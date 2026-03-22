@@ -18,8 +18,10 @@ import Data.List (intercalate)
 import GHC.Core
 import GHC.Core.Type
 import GHC.Core.TyCo.Rep
+import GHC.Core.TyCon
 import GHC.Types.Unique (Unique)
 import GHC.Types.Var (varUnique)
+import GHC.Types.Name (isTupleTyConName)
 import GHC.Utils.Outputable (showPprUnsafe)
 
 type Id = Unique
@@ -101,7 +103,7 @@ makePorts (inty, outty) =
     outports = map Port outty
 
 -- | Extract all arguments and returns
--- If the last return is a type application, return the application list
+-- If the last return is a tuple type application, return the application list
 extractTypes :: [Type] -> Type -> ([Type], [Type])
 extractTypes acc = \case
   ForAllTy _ ty -> extractTypes acc ty
@@ -110,8 +112,7 @@ extractTypes acc = \case
   t -> (reverse acc, extractConstructor [] t)
   where
     extractConstructor resacc = \case
-      TyConApp _ types -> reverse resacc <> types
-      AppTy t1 t2 -> extractConstructor (t1 : resacc) t2
+      TyConApp v types | isTupleTyConName $ tyConName v -> reverse resacc <> types
       t -> reverse (t : resacc)
 
 makeVertex :: CoreBind -> Vertex
