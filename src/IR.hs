@@ -14,7 +14,8 @@ module IR
   )
 where
 
-import Data.List (intercalate)
+import Data.List (intercalate, sort)
+import Data.Maybe (mapMaybe)
 import GHC.Core
 import GHC.Core.Type
 import GHC.Core.TyCo.Rep
@@ -31,7 +32,7 @@ data System = System
   , vertices :: [Vertex]
   , edges :: [Edge]
   -- , sigs :: [(CoreBndr, CoreExpr)]
-  , apps :: [(CoreExpr, [Id], Id)]
+  , apps :: [(CoreExpr, [Var], [Var])]
   }
 instance  Show System where
   show System { id = i, .. } =
@@ -40,7 +41,7 @@ instance  Show System where
     <> ", " <> (intercalate "\n" $ map show vertices)
     <> ", " <> show edges
     -- <> ", " <> "{" <> intercalate ", " (map (\(a, _) -> (showPprUnsafe a)) sigs) <> "}"
-    <> ", " <> "{" <> intercalate ", " (map (\(a, b, c) -> "(" <> (showPprUnsafe a) <> ", " <> (showPprUnsafe b) <> ", " <> (showPprUnsafe c) <> ")") apps) <> "}"
+    <> ", " <> "{" <> intercalate ", " (map (\(a, b, c) -> "(" <> (showPprUnsafe a) <> ", " <> (showPprUnsafe b) <> ", " <> (showPprUnsafe c)) apps) <> "}"
     <> ")"
 
 data Vertex = Vertex
@@ -135,24 +136,12 @@ translateExpr bind expr = out
   where
     -- (vertices, edges) = translateExpr' ([], []) expr
     (binds, sigs) = getSignals [] [] expr
-    apps = map (getApplication binds sigs) sigs
+    apps' = map (getApplication binds sigs) sigs
+    apps = mapMaybe (resolveTuples apps') apps'
     out =
       if length sigs /= 0
         then pure $ System {id = Just $ varUnique bind, vertices = [], edges = [], apps }
         else Nothing
-
--- translateExpr' :: ([Vertex], [Edge]) -> CoreExpr -> ([Vertex], [Edge])
--- translateExpr' acc expr = case collectBinders expr of
---   (binds, Var v) -> acc
---   (binds, Lit l) -> acc
---   (binds, App b a) -> acc
---   (binds, Lam a e) -> acc
---   (binds, Let b e) -> acc
---   (binds, Case e b t alts) -> acc
---   (binds, Cast _ _) -> acc
---   (binds, Tick _ e) -> acc
---   (binds, Type t) -> acc
---   (binds, Coercion _) -> acc
 
 -- | Get the applied signals of a subsystem
 -- These will later be used to derive vertices and edges
@@ -171,11 +160,35 @@ getApplication ::
   [CoreBndr] ->
   [(CoreBndr, CoreExpr)] ->
   (CoreBndr, CoreExpr) ->
-  (CoreExpr, [Id], Id)
-getApplication binds allSigs (output, expr) = (proc, input, varUnique output)
+  (CoreExpr, [Var], Var, Maybe Var)
+getApplication binds allSigs (output, expr) = (proc, input, output, splitTuples)
   where
-    (input, proc) = stripApps [] expr
-    stripApps inputs = \case
-      App e (Var arg) | any (\(sig, _) -> sig == arg) allSigs || any (\bind -> bind == arg) binds ->
-        stripApps (varUnique arg : inputs) e
-      e -> (inputs, e)
+    (input, splitTuples, proc) = stripApps ([], Nothing) expr
+    stripApps (inputs, split) = \case
+      App e (Var arg)
+        | any (\(sig, _) -> sig == arg) allSigs || any (\bind -> bind == arg) binds ->
+        stripApps (arg : inputs, split) e
+      e@(Case (Var arg) _b _t ((Alt _ _ _e) : _))
+        | any (\(sig, _) -> sig == arg) allSigs || any (\bind -> bind == arg) binds ->
+        (inputs, Just arg, e)
+      e -> (inputs, split, e)
+
+resolveTuples ::
+  [(CoreExpr, [Var], Var, Maybe Var)] ->
+  (CoreExpr, [Var], Var, Maybe Var) ->
+  Maybe (CoreExpr, [Var], [Var])
+resolveTuples _ (_, _, _, Just _) = Nothing
+resolveTuples apps (proc, inputs, output, _) = Just (proc, inputs, outputs)
+  where
+    splits = mapMaybe (\(p, _, out, tup) ->
+      case tup of
+        Just tuple | output == tuple -> Just (p, out)
+        _ -> Nothing
+      ) apps
+    outputs' = map snd . sort . mapMaybe getPos $ splits
+    outputs = if length outputs' /= 0 then outputs' else [output]
+    getPos :: (CoreExpr, Var) -> Maybe (Int, Var)
+    getPos (expr, var) = case expr of
+      (Case _ _ _ ((Alt _ args (Var out)) : _)) ->
+        lookup out (zip args (zip [0..] $ repeat var))
+      _ -> Nothing
