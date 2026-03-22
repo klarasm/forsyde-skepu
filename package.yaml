@@ -1,0 +1,65 @@
+name:                forsyde-skepu
+version:             0.1.0.0
+# github:              "klarasm/forsyde-skepu"
+license:             BSD-3-Clause
+author:              "Klara Modin"
+maintainer:          "Klara Modin <smod@kth.se>"
+copyright:           "2026 Klara Modin"
+
+extra-source-files:
+- README.md
+- CHANGELOG.md
+
+# Metadata used when publishing your package
+synopsis:            Source-to-source compiler for ForSyDe-Atom models to SkePU
+# category:            Web
+
+# To avoid duplicated efforts in documentation and dealing with the
+# complications of embedding Haddock markup inside cabal files, it is
+# common to point users to the README.md file.
+# description:         Please see the README on GitHub at <https://github.com/githubuser/forsyde-skepu#readme>
+
+dependencies:
+- base >= 4.7 && < 5
+- filepath ==1.5.4.*
+- forsyde-atom >=0.3.2 && <0.3.3
+- ghc ==9.10.*
+- ghc-paths ==0.1.0.*
+- optparse-applicative ==0.18.1.*
+- syb ==0.7.2.*
+
+ghc-options:
+- -Wall
+- -Wcompat
+- -Widentities
+- -Wincomplete-record-updates
+- -Wincomplete-uni-patterns
+- -Wmissing-export-lists
+- -Wmissing-home-modules
+- -Wpartial-fields
+- -Wredundant-constraints
+
+library:
+  source-dirs: src
+
+executables:
+  forsyde-skepu-exe:
+    main:                Main.hs
+    source-dirs:         app
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - forsyde-skepu
+
+tests:
+  forsyde-skepu-test:
+    main:                Spec.hs
+    source-dirs:         test
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - forsyde-skepu
