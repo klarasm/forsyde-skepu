@@ -20,7 +20,6 @@ extra-source-files:
 library
   exposed-modules:
       IR
-      Lib
       Util
   other-modules:
       Paths_forsyde_skepu
