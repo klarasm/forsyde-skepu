@@ -35,6 +35,8 @@ data Id
 
 data System = System
   { id :: Id
+  , inputs :: [Var]
+  , outputs :: [Var]
   , processes :: [Process]
   , vertices :: [Vertex]
   , edges :: [Edge]
@@ -43,6 +45,8 @@ instance  Show System where
   show System { id = i, .. } =
     "System("
     <> show i
+    <> ", inputs = " <> showPprUnsafe inputs
+    <> ", outputs = " <> showPprUnsafe outputs
     <> ", " <> (unlines . map ("\t" <>) . lines . concat . map (("\n" <>) . show) $ processes)
     <> ", " <> (unlines . map ("\t" <>) . lines . concat $ map (("\n" <>) . show) $ vertices)
     <> ", " <> (unlines . map ("\t" <>) . lines . concat $ map (("\n" <>) . show) $ edges)
@@ -109,6 +113,8 @@ translate :: CoreProgram -> System
 translate f =
   System
   { id = None
+  , inputs = []
+  , outputs = []
   , processes
   , vertices = []
   , edges = []
@@ -159,9 +165,10 @@ makeProcess (NonRec bind expr) =
     (inports, outports) = makePorts . extractTypes [] $ varType bind
 
 translateExpr :: Maybe CoreBndr -> CoreExpr -> Maybe System
-translateExpr bind expr = out
+translateExpr bind expr' = out
   where
-    (binds, sigs) = getSignals [] [] expr
+    (_, inputs, expr) = collectTyAndValBinders expr'
+    (binds, sigs, outputs) = getSignals inputs [] expr
     apps' = map (getApplication binds sigs) sigs
     apps = mapMaybe (resolveTuples apps') apps'
     processes = getProcesses [] expr
@@ -170,6 +177,8 @@ translateExpr bind expr = out
       if length sigs /= 0
         then pure $ System
           { id = maybe None (Unique . varUnique) bind
+          , inputs
+          , outputs
           , processes
           , vertices
           , edges = []
@@ -190,7 +199,7 @@ getSignals ::
   [CoreBndr] ->
   [(CoreBndr, CoreExpr)] ->
   CoreExpr ->
-  ([CoreBndr], [(CoreBndr, CoreExpr)])
+  ([CoreBndr], [(CoreBndr, CoreExpr)], [CoreBndr])
 -- getSignals bindacc acc expr = case collectBinders expr of
 getSignals bindacc acc = \case
   -- A signal should be fully applied, i.e. it should not have any input argument
@@ -204,10 +213,9 @@ getSignals bindacc acc = \case
   Let (Rec sigs) inExpr
     -> getSignals bindacc ((filter ((0==) . length . fst . extractTypes [] . varType . fst) sigs) <> acc) inExpr
   Lam a e ->
-    -- error $ showPprUnsafe a <> showPprUnsafe bindacc
     getSignals (a : bindacc) acc e
   -- NOTE: need to handle system output somehow
-  _ -> (bindacc, acc)
+  _ -> (bindacc, acc, [])
 
 -- | Resolve an application to a process, inputs and (potentially tupled) output
 getApplication ::
