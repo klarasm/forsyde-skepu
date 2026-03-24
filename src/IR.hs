@@ -23,7 +23,7 @@ import GHC.Core.Type
 import GHC.Core.TyCo.Rep
 import GHC.Core.TyCon
 import GHC.Types.Unique (Unique)
-import GHC.Types.Var (varUnique)
+-- import GHC.Types.Var (varUnique)
 import GHC.Utils.Outputable (showPprUnsafe)
 
 data Id
@@ -33,18 +33,15 @@ data Id
   deriving (Show)
 
 data System = System
-  { id :: Id
-  , inputs :: [Var]
+  { inputs :: [Var]
   , outputs :: [Var]
   , processes :: [Process]
   , vertices :: [Vertex]
   , edges :: [Edge]
   }
 instance  Show System where
-  show System { id = i, .. } =
-    "System("
-    <> show i
-    <> ", inputs = " <> showPprUnsafe inputs
+  show System { .. } =
+    "System(inputs = " <> showPprUnsafe inputs
     <> ", outputs = " <> showPprUnsafe outputs
     <> ", " <> (unlines . map ("\t" <>) . lines . concat . map (("\n" <>) . show) $ processes)
     <> ", " <> (unlines . map ("\t" <>) . lines . concat $ map (("\n" <>) . show) $ vertices)
@@ -61,12 +58,10 @@ data Process = Process
   }
 instance Show Process where
   show Process { .. } =
-    "Process("
-      <> showPprUnsafe binder
+    "Process(" <> showPprUnsafe binder
       <> ", inports = " <> show inports
       <> ", outports = " <> show outports
-      <> ", " <> show subsystem
-      -- <> ", {" <> showPprUnsafe body <> "}"
+      <> ", " <> maybe ("{" <> showPprUnsafe body <> "}") show subsystem
       <> ")"
 
 -- A process connected in a network.
@@ -79,11 +74,10 @@ data Vertex = Vertex
   }
 instance Show Vertex where
   show Vertex { id = i, .. } =
-    "Vertex("
-    <> show i
-    <> ", " <> either showPprUnsafe show process
+    "Vertex(" <> show i
     <> ", inputs = " <> showPprUnsafe inputs
     <> ", outputs = " <> showPprUnsafe outputs
+    <> ", " <> either showPprUnsafe show process
     <> ")"
 
 data Edge = Edge
@@ -93,8 +87,7 @@ data Edge = Edge
   }
 instance Show Edge where
   show Edge { .. } =
-    "Edge("
-    <> showPprUnsafe binder
+    "Edge(" <> showPprUnsafe binder
     <> ", " <> show source
     <> ", " <> show target
     <> ")"
@@ -104,15 +97,12 @@ data Port = Port
   }
 instance Show Port where
   show Port { .. } =
-    "Port("
-    <> showPprUnsafe ty
-    <> ")"
+    "Port(" <> showPprUnsafe ty <> ")"
 
 translate :: CoreProgram -> System
 translate f =
   System
-  { id = None
-  , inputs = []
+  { inputs = []
   , outputs = []
   , processes
   , vertices = []
@@ -156,15 +146,15 @@ makeProcess (NonRec bind expr) =
           { binder = Just bind,
             inports,
             outports,
-            subsystem = translateExpr (Just bind) expr,
+            subsystem = translateExpr expr,
             body = expr
           }
     else Nothing
   where
     (inports, outports) = makePorts . extractTypes [] $ varType bind
 
-translateExpr :: Maybe CoreBndr -> CoreExpr -> Maybe System
-translateExpr bind expr' = out
+translateExpr :: CoreExpr -> Maybe System
+translateExpr expr' = out
   where
     (_, inputs, expr) = collectTyAndValBinders expr'
     (binds, sigs, outputs) = getSignals inputs [] expr
@@ -175,8 +165,7 @@ translateExpr bind expr' = out
     out =
       if length sigs /= 0
         then pure $ System
-          { id = maybe None (Unique . varUnique) bind
-          , inputs
+          { inputs
           , outputs
           , processes
           , vertices
@@ -281,7 +270,7 @@ makeVertex = \case
         { binder = Nothing
         , inports = map (Port . varType) inputs
         , outports = map (Port . varType) outputs
-        , subsystem = translateExpr Nothing expr
+        , subsystem = translateExpr expr
         , body = expr
         }
     , inputs
