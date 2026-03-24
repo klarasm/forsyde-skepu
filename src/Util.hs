@@ -24,8 +24,8 @@ compileToCore forSyDePath filePath = runGhc (Just libdir) $ do
   (tcg', _) <- liftIO $ hscTypecheckRename env summary parsed
   let tcg = noInlineTypecheck tcg'
   desugared <- liftIO $ hscDesugar env summary tcg
-  simplified <- liftIO $ hscSimplify env [] desugared
-  return $ (mg_binds simplified, newDflags)
+  -- simplified <- liftIO $ hscSimplify env [] desugared
+  return $ (mg_binds desugared, newDflags)
   where
     makeDynFlags dflags =
       let newDynFlags =
