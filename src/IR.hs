@@ -120,6 +120,12 @@ makePorts (inty, outty) =
 extractTypes :: [Type] -> Type -> ([Type], [Type])
 extractTypes acc = \case
   ForAllTy _ ty -> extractTypes acc ty
+  -- Discard constraints for now
+  FunTy { ft_af = FTF_C_T,  ft_res = res } ->
+    extractTypes acc res
+  FunTy { ft_af = FTF_C_C,  ft_res = res } ->
+    extractTypes acc res
+  -- Add a non-constraint type
   FunTy { ft_arg = arg, ft_res = res } ->
     extractTypes (arg : acc) res
   t -> (reverse acc, extractConstructor [] t)
