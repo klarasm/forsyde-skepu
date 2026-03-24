@@ -19,6 +19,7 @@ import Data.List (sort)
 import Data.Maybe (mapMaybe)
 import GHC.Core
 import GHC.Core.Type
+import GHC.Types.Var (isCoVar)
 import GHC.Core.TyCo.Rep
 import GHC.Core.TyCon
 import GHC.Utils.Outputable (showPprUnsafe)
@@ -154,10 +155,11 @@ translateExpr expr' = out
   where
     (_, inputs, expr) = collectTyAndValBinders expr'
     (binds, sigs, outputs) = getSignals inputs [] expr
-    apps' = map (getApplication binds sigs) sigs
+    apps' = map (getApplication binds) sigs
     apps = mapMaybe (resolveTuples apps') apps'
     processes = getProcesses [] expr
     vertices = zipWith makeVertex [0..] apps
+    edges = mconcat . map (makeEdge vertices) $ binds
     out =
       if length sigs /= 0
         then pure $ System
@@ -165,7 +167,7 @@ translateExpr expr' = out
           , outputs
           , processes
           , vertices
-          , edges = []
+          , edges
           }
         else Nothing
 
@@ -184,45 +186,44 @@ getSignals ::
   [(CoreBndr, CoreExpr)] ->
   CoreExpr ->
   ([CoreBndr], [(CoreBndr, CoreExpr)], [CoreBndr])
--- getSignals bindacc acc expr = case collectBinders expr of
 getSignals bindacc acc = \case
   -- A signal should be fully applied, i.e. it should not have any input argument
   Let (NonRec b e) inExpr | length (fst $ extractTypes [] $ varType b) == 0
-    -> getSignals bindacc ((b, e) : acc) inExpr
+    -> getSignals (b : bindacc) ((b, e) : acc) inExpr
   -- Likely a process, handled separately
   Let (NonRec _ _) inExpr | otherwise
     -> getSignals bindacc acc inExpr
   -- A Rec binding should not contain any process since they are supposed to be
   -- self-contained. Therefore filter binds with inputs.
   Let (Rec sigs) inExpr
-    -> getSignals bindacc ((filter ((0==) . length . fst . extractTypes [] . varType . fst) sigs) <> acc) inExpr
+    -> let sigs' = filter ((0==) . length . fst . extractTypes [] . varType . fst) sigs
+           b = map fst sigs'
+        in getSignals (b <> bindacc) (sigs' <> acc) inExpr
   Lam a e ->
     getSignals (a : bindacc) acc e
-  Var v -> (bindacc, acc, [v])
+  Var v -> (v : bindacc, acc, [v])
   -- NOTE: should verify that the function is tuple
   e -> let (_, args) = collectArgs e
            argvars = mapMaybe (\case
-             Var v -> Just v
+             Var v | isCoVar v -> Nothing
+             Var v | otherwise -> Just v
              Type _ -> Nothing
              _ -> Nothing
              ) args
-        in (bindacc, acc, argvars)
+        in (argvars <> bindacc, acc, argvars)
 
 -- | Resolve an application to a process, inputs and (potentially tupled) output
 getApplication ::
   [CoreBndr] ->
-  [(CoreBndr, CoreExpr)] ->
   (CoreBndr, CoreExpr) ->
   (CoreExpr, [Var], Var, Maybe Var)
-getApplication binds allSigs (output, expr) = (proc, input, output, splitTuples)
+getApplication binds (output, expr) = (proc, input, output, splitTuples)
   where
     (input, splitTuples, proc) = stripApps ([], Nothing) expr
     stripApps (inputs, split) = \case
-      App e (Var arg)
-        | any (\(sig, _) -> sig == arg) allSigs || any (\bind -> bind == arg) binds ->
+      App e (Var arg) | any (\bind -> bind == arg) binds ->
         stripApps (arg : inputs, split) e
-      e@(Case (Var arg) _b _t ((Alt _ _ _e) : _))
-        | any (\(sig, _) -> sig == arg) allSigs || any (\bind -> bind == arg) binds ->
+      e@(Case (Var arg) _b _t ((Alt _ _ _e) : _)) | any (\bind -> bind == arg) binds ->
         (inputs, Just arg, e)
       e -> (inputs, split, e)
 
@@ -272,3 +273,9 @@ makeVertex i = \case
     , inputs
     , outputs
     }
+
+makeEdge :: [Vertex] -> CoreBndr -> [Edge]
+makeEdge vertices bind = [Edge bind] <*> source <*> targets
+  where
+    source = [i | Vertex { id = i, outputs } <- vertices, bind `elem` outputs]
+    targets = [i | Vertex { id = i, inputs } <- vertices, bind `elem` inputs]
