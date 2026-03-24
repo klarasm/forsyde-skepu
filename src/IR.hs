@@ -24,7 +24,6 @@ import GHC.Core.TyCo.Rep
 import GHC.Core.TyCon
 import GHC.Types.Unique (Unique)
 import GHC.Types.Var (varUnique)
-import GHC.Types.Name (isTupleTyConName)
 import GHC.Utils.Outputable (showPprUnsafe)
 
 data Id
@@ -139,7 +138,7 @@ extractTypes acc = \case
   t -> (reverse acc, extractConstructor [] t)
   where
     extractConstructor resacc = \case
-      TyConApp v types | isTupleTyConName $ tyConName v -> reverse resacc <> types
+      TyConApp v types | isTupleTyCon v -> reverse resacc <> types
       t -> reverse (t : resacc)
 
 -- | Make a process from a binding.
@@ -214,8 +213,15 @@ getSignals bindacc acc = \case
     -> getSignals bindacc ((filter ((0==) . length . fst . extractTypes [] . varType . fst) sigs) <> acc) inExpr
   Lam a e ->
     getSignals (a : bindacc) acc e
-  -- NOTE: need to handle system output somehow
-  _ -> (bindacc, acc, [])
+  Var v -> (bindacc, acc, [v])
+  -- NOTE: should verify that the function is tuple
+  e -> let (_, args) = collectArgs e
+           argvars = mapMaybe (\case
+             Var v -> Just v
+             Type _ -> Nothing
+             _e -> error $ showPprUnsafe _e
+             ) args
+        in (bindacc, acc, argvars)
 
 -- | Resolve an application to a process, inputs and (potentially tupled) output
 getApplication ::
