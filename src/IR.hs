@@ -15,22 +15,13 @@ module IR
   )
 where
 
---import Data.List (intercalate, sort)
 import Data.List (sort)
 import Data.Maybe (mapMaybe)
 import GHC.Core
 import GHC.Core.Type
 import GHC.Core.TyCo.Rep
 import GHC.Core.TyCon
-import GHC.Types.Unique (Unique)
--- import GHC.Types.Var (varUnique)
 import GHC.Utils.Outputable (showPprUnsafe)
-
-data Id
-  = None
-  | Unique Unique
-  | Assigned Int
-  deriving (Show)
 
 data System = System
   { inputs :: [Var]
@@ -65,9 +56,12 @@ instance Show Process where
       <> ")"
 
 -- A process connected in a network.
--- It must therefore have at least an input and an output
+-- It must therefore have at least an input and an output.
+-- A vertex can only be referred to inside the same system, since it represents
+-- an application of a process inside the system. This means the id only needs
+-- to be unique inside the system.
 data Vertex = Vertex
-  { id :: Id
+  { id :: Int
   , process :: Either Var Process
   , inputs :: [Var]
   , outputs :: [Var]
@@ -80,10 +74,12 @@ instance Show Vertex where
     <> ", " <> either showPprUnsafe show process
     <> ")"
 
+-- An edge (signal) inside a system.
+-- Can only refer to local vertices.
 data Edge = Edge
   { binder :: !Var
-  , source :: !Id
-  , target :: !Id
+  , source :: !Int
+  , target :: !Int
   }
 instance Show Edge where
   show Edge { .. } =
@@ -161,7 +157,7 @@ translateExpr expr' = out
     apps' = map (getApplication binds sigs) sigs
     apps = mapMaybe (resolveTuples apps') apps'
     processes = getProcesses [] expr
-    vertices = map makeVertex apps
+    vertices = zipWith makeVertex [0..] apps
     out =
       if length sigs /= 0
         then pure $ System
@@ -208,7 +204,7 @@ getSignals bindacc acc = \case
            argvars = mapMaybe (\case
              Var v -> Just v
              Type _ -> Nothing
-             _e -> error $ showPprUnsafe _e
+             _ -> Nothing
              ) args
         in (bindacc, acc, argvars)
 
@@ -251,12 +247,12 @@ resolveTuples apps (proc, inputs, output, _) = Just (proc, inputs, outputs)
         lookup out (zip args (zip [0..] $ repeat var))
       _ -> Nothing
 
-makeVertex :: (CoreExpr, [Var], [Var]) -> Vertex
-makeVertex = \case
+makeVertex :: Int -> (CoreExpr, [Var], [Var]) -> Vertex
+makeVertex i = \case
   -- An application of a non-inline process
   (Var bind, inputs, outputs) ->
       Vertex
-      { id = None
+      { id = i
       , process = Left bind
       , inputs
       , outputs
@@ -264,7 +260,7 @@ makeVertex = \case
   -- An application of an inline process definition
   (expr, inputs, outputs) ->
     Vertex
-    { id = None
+    { id = i
     , process = Right $
         Process
         { binder = Nothing
