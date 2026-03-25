@@ -19,9 +19,9 @@ import Data.List (sort)
 import Data.Maybe (mapMaybe)
 import GHC.Core
 import GHC.Core.Type
-import GHC.Types.Var (isCoVar)
 import GHC.Core.TyCo.Rep
 import GHC.Core.TyCon
+import GHC.Types.Var (isTyCoVar)
 import GHC.Utils.Outputable (showPprUnsafe)
 
 data System = System
@@ -36,8 +36,8 @@ instance  Show System where
     "System(inputs = " <> showPprUnsafe inputs
     <> ", outputs = " <> showPprUnsafe outputs
     <> ", " <> (unlines . map ("\t" <>) . lines . concat . map (("\n" <>) . show) $ processes)
-    <> ", " <> (unlines . map ("\t" <>) . lines . concat $ map (("\n" <>) . show) $ vertices)
-    <> ", " <> (unlines . map ("\t" <>) . lines . concat $ map (("\n" <>) . show) $ edges)
+    <> ", " <> (unlines . map ("\t" <>) . lines . concat . map (("\n" <>) . show) $ vertices)
+    <> ", " <> (unlines . map ("\t" <>) . lines . concat . map (("\n" <>) . show) $ edges)
     <> ")"
 
 -- A process constructor applied to a function, but not connected in a network.
@@ -156,10 +156,14 @@ makeProcess (NonRec bind expr) =
   where
     (inports, outports) = makePorts . extractTypes [] $ varType bind
 
+typeOrConstraint :: Var -> Bool
+typeOrConstraint v = isTyCoVar v || (isPredTy . varType) v
+
 translateExpr :: CoreExpr -> Maybe System
 translateExpr expr' = out
   where
-    (_, inputs, expr) = collectTyAndValBinders expr'
+    (_, inputs', expr) = collectTyAndValBinders expr'
+    inputs = filter (not . typeOrConstraint) inputs'
     (binds, sigs, outputs) = getSignals inputs [] expr
     apps' = map (getApplication binds) sigs
     apps = mapMaybe (resolveTuples apps') apps'
@@ -206,12 +210,14 @@ getSignals bindacc acc = \case
            b = map fst sigs'
         in getSignals (b <> bindacc) (sigs' <> acc) inExpr
   Lam a e ->
-    getSignals (a : bindacc) acc e
+    if typeOrConstraint a
+      then getSignals bindacc acc e
+      else getSignals (a : bindacc) acc e
   Var v -> (v : bindacc, acc, [v])
   -- NOTE: should verify that the function is tuple
   e -> let (_, args) = collectArgs e
            argvars = mapMaybe (\case
-             Var v | isCoVar v -> Nothing
+             Var v | typeOrConstraint v -> Nothing
              Var v | otherwise -> Just v
              Type _ -> Nothing
              _ -> Nothing
