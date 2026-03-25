@@ -1,9 +1,8 @@
 module Main (main) where
 
-import Options.Applicative
--- import GHC.Core
-import Util
 import IR
+import Options.Applicative
+import Util
 
 data Arguments = Arguments
   { inputFile :: String
