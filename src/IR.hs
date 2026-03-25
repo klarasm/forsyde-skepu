@@ -1,26 +1,26 @@
-{-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE NoFieldSelectors #-}
-{-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE NoFieldSelectors #-}
 
-module IR
-  ( System (..)
-  , Process (..)
-  , Vertex (..)
-  , Edge (..)
-  , Port (..)
-  , translate
-  )
+module IR (
+  System (..),
+  Process (..),
+  Vertex (..),
+  Edge (..),
+  Port (..),
+  translate,
+)
 where
 
 import Data.List (sort)
 import Data.Maybe (mapMaybe)
 import GHC.Core
-import GHC.Core.Type
 import GHC.Core.TyCo.Rep
 import GHC.Core.TyCon
+import GHC.Core.Type
 import GHC.Types.Var (isTyCoVar)
 import GHC.Utils.Outputable (showPprUnsafe)
 
@@ -31,14 +31,19 @@ data System = System
   , vertices :: [Vertex]
   , edges :: [Edge]
   }
-instance  Show System where
-  show System { .. } =
-    "System(inputs = " <> showPprUnsafe inputs
-    <> ", outputs = " <> showPprUnsafe outputs
-    <> ", " <> (unlines . map ("\t" <>) . lines . concat . map (("\n" <>) . show) $ processes)
-    <> ", " <> (unlines . map ("\t" <>) . lines . concat . map (("\n" <>) . show) $ vertices)
-    <> ", " <> (unlines . map ("\t" <>) . lines . concat . map (("\n" <>) . show) $ edges)
-    <> ")"
+instance Show System where
+  show System{..} =
+    "System(inputs = "
+      <> showPprUnsafe inputs
+      <> ", outputs = "
+      <> showPprUnsafe outputs
+      <> ", "
+      <> (unlines . map ("\t" <>) . lines . concat . map (("\n" <>) . show) $ processes)
+      <> ", "
+      <> (unlines . map ("\t" <>) . lines . concat . map (("\n" <>) . show) $ vertices)
+      <> ", "
+      <> (unlines . map ("\t" <>) . lines . concat . map (("\n" <>) . show) $ edges)
+      <> ")"
 
 -- A process constructor applied to a function, but not connected in a network.
 data Process = Process
@@ -49,11 +54,15 @@ data Process = Process
   , body :: CoreExpr
   }
 instance Show Process where
-  show Process { .. } =
-    "Process(" <> showPprUnsafe binder
-      <> ", inports = " <> show inports
-      <> ", outports = " <> show outports
-      <> ", " <> maybe ("{" <> showPprUnsafe body <> "}") show subsystem
+  show Process{..} =
+    "Process("
+      <> showPprUnsafe binder
+      <> ", inports = "
+      <> show inports
+      <> ", outports = "
+      <> show outports
+      <> ", "
+      <> maybe ("{" <> showPprUnsafe body <> "}") show subsystem
       <> ")"
 
 -- A process connected in a network.
@@ -68,12 +77,16 @@ data Vertex = Vertex
   , outputs :: [Var]
   }
 instance Show Vertex where
-  show Vertex { id = i, .. } =
-    "Vertex(" <> show i
-    <> ", inputs = " <> showPprUnsafe inputs
-    <> ", outputs = " <> showPprUnsafe outputs
-    <> ", " <> either showPprUnsafe show process
-    <> ")"
+  show Vertex{id = i, ..} =
+    "Vertex("
+      <> show i
+      <> ", inputs = "
+      <> showPprUnsafe inputs
+      <> ", outputs = "
+      <> showPprUnsafe outputs
+      <> ", "
+      <> either showPprUnsafe show process
+      <> ")"
 
 -- An edge (signal) inside a system.
 -- Can only refer to local vertices.
@@ -83,60 +96,65 @@ data Edge = Edge
   , target :: !Int
   }
 instance Show Edge where
-  show Edge { .. } =
-    "Edge(" <> showPprUnsafe binder
-    <> ", " <> show source
-    <> ", " <> show target
-    <> ")"
+  show Edge{..} =
+    "Edge("
+      <> showPprUnsafe binder
+      <> ", "
+      <> show source
+      <> ", "
+      <> show target
+      <> ")"
 
 data Port = Port
   { ty :: Type
   }
 instance Show Port where
-  show Port { .. } =
+  show Port{..} =
     "Port(" <> showPprUnsafe ty <> ")"
 
 translate :: CoreProgram -> System
 translate f =
   System
-  { inputs = []
-  , outputs = []
-  , processes
-  , vertices = []
-  , edges = []
-  }
-  where
-    processes = mapMaybe makeProcess $ f
+    { inputs = []
+    , outputs = []
+    , processes
+    , vertices = []
+    , edges = []
+    }
+ where
+  processes = mapMaybe makeProcess $ f
 
 makePorts :: ([Type], [Type]) -> ([Port], [Port])
 makePorts (inty, outty) =
   (inports, outports)
-  where
-    inports = map Port inty
-    outports = map Port outty
+ where
+  inports = map Port inty
+  outports = map Port outty
 
--- | Extract all arguments and returns
--- If the last return is a tuple type application, return the application list
+{- | Extract all arguments and returns
+If the last return is a tuple type application, return the application list
+-}
 extractTypes :: [Type] -> Type -> ([Type], [Type])
 extractTypes acc = \case
   ForAllTy _ ty -> extractTypes acc ty
   -- Discard constraints for now
-  FunTy { ft_af = FTF_C_T,  ft_res = res } ->
+  FunTy{ft_af = FTF_C_T, ft_res = res} ->
     extractTypes acc res
-  FunTy { ft_af = FTF_C_C,  ft_res = res } ->
+  FunTy{ft_af = FTF_C_C, ft_res = res} ->
     extractTypes acc res
   -- Add a non-constraint type
-  FunTy { ft_arg = arg, ft_res = res } ->
+  FunTy{ft_arg = arg, ft_res = res} ->
     extractTypes (arg : acc) res
   t -> (reverse acc, extractConstructor [] t)
-  where
-    extractConstructor resacc = \case
-      TyConApp v types | isTupleTyCon v -> reverse resacc <> types
-      t -> reverse (t : resacc)
+ where
+  extractConstructor resacc = \case
+    TyConApp v types | isTupleTyCon v -> reverse resacc <> types
+    t -> reverse (t : resacc)
 
--- | Make a process from a binding.
--- A process should be self-contained, i.e. not have any communication outside
--- of its arguments and return.
+{- | Make a process from a binding.
+A process should be self-contained, i.e. not have any communication outside
+of its arguments and return.
+-}
 makeProcess :: CoreBind -> Maybe Process
 makeProcess (Rec _) = Nothing -- disallow non-self-contained processes
 makeProcess (NonRec bind expr) =
@@ -146,43 +164,46 @@ makeProcess (NonRec bind expr) =
     then
       Just
         Process
-          { binder = Just bind,
-            inports,
-            outports,
-            subsystem = translateExpr expr,
-            body = expr
+          { binder = Just bind
+          , inports
+          , outports
+          , subsystem = translateExpr expr
+          , body = expr
           }
     else Nothing
-  where
-    (inports, outports) = makePorts . extractTypes [] $ varType bind
+ where
+  (inports, outports) = makePorts . extractTypes [] $ varType bind
 
 typeOrConstraint :: Var -> Bool
 typeOrConstraint v = isTyCoVar v || (isPredTy . varType) v
 
 translateExpr :: CoreExpr -> Maybe System
 translateExpr expr' = out
-  where
-    (_, inputs', expr) = collectTyAndValBinders expr'
-    inputs = filter (not . typeOrConstraint) inputs'
-    (binds, sigs, outputs) = getSignals inputs [] expr
-    apps' = map (getApplication binds) sigs
-    apps = mapMaybe (resolveTuples apps') apps'
-    processes = getProcesses [] expr
-    vertices =
-      zipWith makeVertex [0 ..] $ apps
-          <> map (\v -> (Var v, [], [v])) inputs
-          <> map (\v -> (Var v, [v], [])) outputs
-    edges = mconcat . map (makeEdge vertices) $ binds
-    out =
-      if length sigs /= 0
-        then pure $ System
-          { inputs
-          , outputs
-          , processes
-          , vertices
-          , edges
-          }
-        else Nothing
+ where
+  (_, inputs', expr) = collectTyAndValBinders expr'
+  inputs = filter (not . typeOrConstraint) inputs'
+  (binds, sigs, outputs) = getSignals inputs [] expr
+  apps' = map (getApplication binds) sigs
+  apps = mapMaybe (resolveTuples apps') apps'
+  processes = getProcesses [] expr
+  vertices =
+    zipWith makeVertex [0 ..] $
+      apps
+        <> map (\v -> (Var v, [], [v])) inputs
+        <> map (\v -> (Var v, [v], [])) outputs
+  edges = mconcat . map (makeEdge vertices) $ binds
+  out =
+    if length sigs /= 0
+      then
+        pure $
+          System
+            { inputs
+            , outputs
+            , processes
+            , vertices
+            , edges
+            }
+      else Nothing
 
 getProcesses :: [Process] -> CoreExpr -> [Process]
 getProcesses acc = \case
@@ -192,8 +213,9 @@ getProcesses acc = \case
     Just proc -> getProcesses (proc : acc) expr
   _ -> acc
 
--- | Get the applied signals of a subsystem
--- These will later be used to derive vertices and edges
+{- | Get the applied signals of a subsystem
+These will later be used to derive vertices and edges
+-}
 getSignals ::
   [CoreBndr] ->
   [(CoreBndr, CoreExpr)] ->
@@ -201,31 +223,37 @@ getSignals ::
   ([CoreBndr], [(CoreBndr, CoreExpr)], [CoreBndr])
 getSignals bindacc acc = \case
   -- A signal should be fully applied, i.e. it should not have any input argument
-  Let (NonRec b e) inExpr | length (fst $ extractTypes [] $ varType b) == 0
-    -> getSignals (b : bindacc) ((b, e) : acc) inExpr
+  Let (NonRec b e) inExpr
+    | length (fst $ extractTypes [] $ varType b) == 0 ->
+        getSignals (b : bindacc) ((b, e) : acc) inExpr
   -- Likely a process, handled separately
-  Let (NonRec _ _) inExpr | otherwise
-    -> getSignals bindacc acc inExpr
+  Let (NonRec _ _) inExpr
+    | otherwise ->
+        getSignals bindacc acc inExpr
   -- A Rec binding should not contain any process since they are supposed to be
   -- self-contained. Therefore filter binds with inputs.
-  Let (Rec sigs) inExpr
-    -> let sigs' = filter ((0==) . length . fst . extractTypes [] . varType . fst) sigs
-           b = map fst sigs'
-        in getSignals (b <> bindacc) (sigs' <> acc) inExpr
+  Let (Rec sigs) inExpr ->
+    let sigs' = filter ((0 ==) . length . fst . extractTypes [] . varType . fst) sigs
+        b = map fst sigs'
+     in getSignals (b <> bindacc) (sigs' <> acc) inExpr
   Lam a e ->
     if typeOrConstraint a
       then getSignals bindacc acc e
       else getSignals (a : bindacc) acc e
   Var v -> (bindacc, acc, [v])
   -- NOTE: should verify that the function is tuple
-  e -> let (_, args) = collectArgs e
-           argvars = mapMaybe (\case
-             Var v | typeOrConstraint v -> Nothing
-             Var v | otherwise -> Just v
-             Type _ -> Nothing
-             _ -> Nothing
-             ) args
-        in (bindacc, acc, argvars)
+  e ->
+    let (_, args) = collectArgs e
+        argvars =
+          mapMaybe
+            ( \case
+                Var v | typeOrConstraint v -> Nothing
+                Var v | otherwise -> Just v
+                Type _ -> Nothing
+                _ -> Nothing
+            )
+            args
+     in (bindacc, acc, argvars)
 
 -- | Resolve an application to a process, inputs and (potentially tupled) output
 getApplication ::
@@ -233,14 +261,16 @@ getApplication ::
   (CoreBndr, CoreExpr) ->
   (CoreExpr, [Var], Var, Maybe Var)
 getApplication binds (output, expr) = (proc, input, output, splitTuples)
-  where
-    (input, splitTuples, proc) = stripApps ([], Nothing) expr
-    stripApps (inputs, split) = \case
-      App e (Var arg) | any (\bind -> bind == arg) binds ->
-        stripApps (arg : inputs, split) e
-      e@(Case (Var arg) _b _t ((Alt _ _ _e) : _)) | any (\bind -> bind == arg) binds ->
-        (inputs, Just arg, e)
-      e -> (inputs, split, e)
+ where
+  (input, splitTuples, proc) = stripApps ([], Nothing) expr
+  stripApps (inputs, split) = \case
+    App e (Var arg)
+      | any (\bind -> bind == arg) binds ->
+          stripApps (arg : inputs, split) e
+    e@(Case (Var arg) _b _t ((Alt _ _ _e) : _))
+      | any (\bind -> bind == arg) binds ->
+          (inputs, Just arg, e)
+    e -> (inputs, split, e)
 
 -- | Resolve tupled outputs to their actual output signals
 resolveTuples ::
@@ -249,25 +279,28 @@ resolveTuples ::
   Maybe (CoreExpr, [Var], [Var])
 resolveTuples _ (_, _, _, Just _) = Nothing
 resolveTuples apps (proc, inputs, output, _) = Just (proc, inputs, outputs)
-  where
-    splits = mapMaybe (\(p, _, out, tup) ->
-      case tup of
-        Just tuple | output == tuple -> Just (p, out)
-        _ -> Nothing
-      ) apps
-    outputs' = map snd . sort . mapMaybe getPos $ splits
-    outputs = if length outputs' /= 0 then outputs' else [output]
-    getPos :: (CoreExpr, Var) -> Maybe (Int, Var)
-    getPos (expr, var) = case expr of
-      (Case _ _ _ ((Alt _ args (Var out)) : _)) ->
-        lookup out (zip args (zip [0..] $ repeat var))
-      _ -> Nothing
+ where
+  splits =
+    mapMaybe
+      ( \(p, _, out, tup) ->
+          case tup of
+            Just tuple | output == tuple -> Just (p, out)
+            _ -> Nothing
+      )
+      apps
+  outputs' = map snd . sort . mapMaybe getPos $ splits
+  outputs = if length outputs' /= 0 then outputs' else [output]
+  getPos :: (CoreExpr, Var) -> Maybe (Int, Var)
+  getPos (expr, var) = case expr of
+    (Case _ _ _ ((Alt _ args (Var out)) : _)) ->
+      lookup out (zip args (zip [0 ..] $ repeat var))
+    _ -> Nothing
 
 makeVertex :: Int -> (CoreExpr, [Var], [Var]) -> Vertex
 makeVertex i = \case
   -- An application of a non-inline process
   (Var bind, inputs, outputs) ->
-      Vertex
+    Vertex
       { id = i
       , process = Left bind
       , inputs
@@ -276,21 +309,22 @@ makeVertex i = \case
   -- An application of an inline process definition
   (expr, inputs, outputs) ->
     Vertex
-    { id = i
-    , process = Right $
-        Process
-        { binder = Nothing
-        , inports = map (Port . varType) inputs
-        , outports = map (Port . varType) outputs
-        , subsystem = translateExpr expr
-        , body = expr
-        }
-    , inputs
-    , outputs
-    }
+      { id = i
+      , process =
+          Right $
+            Process
+              { binder = Nothing
+              , inports = map (Port . varType) inputs
+              , outports = map (Port . varType) outputs
+              , subsystem = translateExpr expr
+              , body = expr
+              }
+      , inputs
+      , outputs
+      }
 
 makeEdge :: [Vertex] -> CoreBndr -> [Edge]
 makeEdge vertices bind = [Edge bind] <*> source <*> targets
-  where
-    source = [i | Vertex { id = i, outputs } <- vertices, bind `elem` outputs]
-    targets = [i | Vertex { id = i, inputs } <- vertices, bind `elem` inputs]
+ where
+  source = [i | Vertex{id = i, outputs} <- vertices, bind `elem` outputs]
+  targets = [i | Vertex{id = i, inputs} <- vertices, bind `elem` inputs]
