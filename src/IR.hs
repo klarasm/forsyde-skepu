@@ -168,7 +168,10 @@ translateExpr expr' = out
     apps' = map (getApplication binds) sigs
     apps = mapMaybe (resolveTuples apps') apps'
     processes = getProcesses [] expr
-    vertices = zipWith makeVertex [0..] apps
+    vertices =
+      zipWith makeVertex [0 ..] $ apps
+          <> map (\v -> (Var v, [], [v])) inputs
+          <> map (\v -> (Var v, [v], [])) outputs
     edges = mconcat . map (makeEdge vertices) $ binds
     out =
       if length sigs /= 0
@@ -213,7 +216,7 @@ getSignals bindacc acc = \case
     if typeOrConstraint a
       then getSignals bindacc acc e
       else getSignals (a : bindacc) acc e
-  Var v -> (v : bindacc, acc, [v])
+  Var v -> (bindacc, acc, [v])
   -- NOTE: should verify that the function is tuple
   e -> let (_, args) = collectArgs e
            argvars = mapMaybe (\case
@@ -222,7 +225,7 @@ getSignals bindacc acc = \case
              Type _ -> Nothing
              _ -> Nothing
              ) args
-        in (argvars <> bindacc, acc, argvars)
+        in (bindacc, acc, argvars)
 
 -- | Resolve an application to a process, inputs and (potentially tupled) output
 getApplication ::
