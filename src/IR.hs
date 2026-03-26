@@ -15,6 +15,7 @@ module IR (
 )
 where
 
+import Control.Monad
 import Data.List (sort)
 import Data.Maybe (mapMaybe)
 import GHC.Core
@@ -23,6 +24,7 @@ import GHC.Core.TyCon
 import GHC.Core.DataCon
 import GHC.Core.Type
 import GHC.Types.Var (isTyCoVar)
+import GHC.Types.Name (getName, getOccString)
 import GHC.Utils.Outputable (showPprUnsafe)
 
 data System = System
@@ -123,7 +125,7 @@ translate f =
     , edges = []
     }
  where
-  processes = mapMaybe makeProcess $ f
+  processes = mapMaybe (makeProcess . Right) f
 
 makePorts :: ([Type], [Type]) -> ([Port], [Port])
 makePorts (inty, outty) =
@@ -156,24 +158,34 @@ extractTypes acc = \case
 A process should be self-contained, i.e. not have any communication outside
 of its arguments and return.
 -}
-makeProcess :: CoreBind -> Maybe Process
-makeProcess (Rec _) = Nothing -- disallow non-self-contained processes
-makeProcess (NonRec bind expr) =
+makeProcess :: Either (CoreExpr, [Var], [Var]) CoreBind -> Maybe Process
+makeProcess = \case
+  Right (Rec _) -> Nothing
+  Right (NonRec bind expr) ->
   -- A process needs both an input and an output. A function with just an
   -- output is a value
-  if length inports /= 0 && length outports /= 0
-    then
-      Just
-        Process
-          { binder = Just bind
-          , inports
-          , outports
-          , subsystem = translateExpr expr
-          , body = expr
-          }
-    else Nothing
- where
-  (inports, outports) = makePorts . extractTypes [] $ varType bind
+    if length inports /= 0 && length outports /= 0
+      then
+        Just
+          Process
+            { binder = Just bind
+            , inports
+            , outports
+            , subsystem = translateExpr expr
+            , body = expr
+            }
+      else Nothing
+   where
+    (inports, outports) = makePorts . extractTypes [] $ varType bind
+  Left (expr, inputs, outputs) ->
+        Just
+          Process
+            { binder = Nothing
+            , inports = map (Port . varType) inputs
+            , outports = map (Port . varType) outputs
+            , subsystem = translateExpr expr
+            , body = expr
+            }
 
 typeOrConstraint :: Var -> Bool
 typeOrConstraint v = isTyCoVar v || (isPredTy . varType) v
@@ -188,14 +200,15 @@ translateExpr expr' = out
   apps = mapMaybe (resolveTuples apps') apps'
   processes = getProcesses [] expr
   vertices =
-    zipWith makeVertex [0 ..] $
-      apps
-        <> map (\v -> (Var v, [], [v])) inputs
-        <> map (\(v, m) -> (Var v, [v], m)) inputMap
-        <> map (\v -> (Var v, [v], [])) outputs
+    mapMaybe id $
+      zipWith makeVertex [0 ..] $
+        apps
+          <> map (\v -> (Var v, [], [v])) inputs
+          <> map (\(v, m) -> (Var v, [v], m)) inputMap
+          <> map (\v -> (Var v, [v], [])) outputs
   edges = mconcat . map (makeEdge vertices) $ binds
   out =
-    if length sigs /= 0
+    if length edges /= 0
       then
         pure $
           System
@@ -210,9 +223,13 @@ translateExpr expr' = out
 getProcesses :: [Process] -> CoreExpr -> [Process]
 getProcesses acc = \case
   Lam _ e -> getProcesses acc e
-  Let bind expr -> case makeProcess bind of
+  Let bind expr -> case makeProcess (Right bind) of
     Nothing -> getProcesses acc expr
     Just proc -> getProcesses (proc : acc) expr
+  -- Function composition
+  App (App (App (App (App (Var v) _) _) _) e1) e2 | "." == (getOccString . getName) v ->
+    let procs = getProcesses acc e1
+     in getProcesses procs e2
   _ -> acc
 
 {- | Get the applied signals of a subsystem
@@ -302,29 +319,25 @@ resolveTuples apps (proc, inputs, output, _) = Just (proc, inputs, outputs)
       lookup out (zip args (zip [0 ..] $ repeat var))
     _ -> Nothing
 
-makeVertex :: Int -> (CoreExpr, [Var], [Var]) -> Vertex
+makeVertex :: Int -> (CoreExpr, [Var], [Var]) -> Maybe Vertex
 makeVertex i = \case
   -- An application of a non-inline process
   (Var bind, inputs, outputs) ->
-    Vertex
+    Just $ Vertex
       { id = i
       , process = Left bind
       , inputs
       , outputs
       }
+  -- Function composition
+  -- (App (App (App (App (App (Var v) _) _) _) e1) e2, inputs, outputs) | "." == (getOccString . getName) v ->
+  --   undefined
   -- An application of an inline process definition
-  (expr, inputs, outputs) ->
-    Vertex
+  (expr, inputs, outputs) -> do
+    process <- liftM Right $ makeProcess (Left (expr, inputs, outputs))
+    pure $ Vertex
       { id = i
-      , process =
-          Right $
-            Process
-              { binder = Nothing
-              , inports = map (Port . varType) inputs
-              , outports = map (Port . varType) outputs
-              , subsystem = translateExpr expr
-              , body = expr
-              }
+      , process
       , inputs
       , outputs
       }
