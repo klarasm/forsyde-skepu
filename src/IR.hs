@@ -20,6 +20,7 @@ import Data.Maybe (mapMaybe)
 import GHC.Core
 import GHC.Core.TyCo.Rep
 import GHC.Core.TyCon
+import GHC.Core.DataCon
 import GHC.Core.Type
 import GHC.Types.Var (isTyCoVar)
 import GHC.Utils.Outputable (showPprUnsafe)
@@ -182,7 +183,7 @@ translateExpr expr' = out
  where
   (_, inputs', expr) = collectTyAndValBinders expr'
   inputs = filter (not . typeOrConstraint) inputs'
-  (binds, sigs, outputs) = getSignals inputs [] expr
+  (binds, inputMap, sigs, outputs) = getSignals inputs [] [] expr
   apps' = map (getApplication binds) sigs
   apps = mapMaybe (resolveTuples apps') apps'
   processes = getProcesses [] expr
@@ -190,6 +191,7 @@ translateExpr expr' = out
     zipWith makeVertex [0 ..] $
       apps
         <> map (\v -> (Var v, [], [v])) inputs
+        <> map (\(v, m) -> (Var v, [v], m)) inputMap
         <> map (\v -> (Var v, [v], [])) outputs
   edges = mconcat . map (makeEdge vertices) $ binds
   out =
@@ -218,29 +220,33 @@ These will later be used to derive vertices and edges
 -}
 getSignals ::
   [CoreBndr] ->
+  [(CoreBndr, [CoreBndr])] ->
   [(CoreBndr, CoreExpr)] ->
   CoreExpr ->
-  ([CoreBndr], [(CoreBndr, CoreExpr)], [CoreBndr])
-getSignals bindacc acc = \case
+  ([CoreBndr], [(CoreBndr, [CoreBndr])], [(CoreBndr, CoreExpr)], [CoreBndr])
+getSignals bindacc inputAcc acc = \case
   -- A signal should be fully applied, i.e. it should not have any input argument
   Let (NonRec b e) inExpr
     | length (fst $ extractTypes [] $ varType b) == 0 ->
-        getSignals (b : bindacc) ((b, e) : acc) inExpr
+        getSignals (b : bindacc) inputAcc ((b, e) : acc) inExpr
   -- Likely a process, handled separately
   Let (NonRec _ _) inExpr
     | otherwise ->
-        getSignals bindacc acc inExpr
+        getSignals bindacc inputAcc acc inExpr
   -- A Rec binding should not contain any process since they are supposed to be
   -- self-contained. Therefore filter binds with inputs.
   Let (Rec sigs) inExpr ->
     let sigs' = filter ((0 ==) . length . fst . extractTypes [] . varType . fst) sigs
         b = map fst sigs'
-     in getSignals (b <> bindacc) (sigs' <> acc) inExpr
+     in getSignals (b <> bindacc) inputAcc (sigs' <> acc) inExpr
   Lam a e ->
     if typeOrConstraint a
-      then getSignals bindacc acc e
-      else getSignals (a : bindacc) acc e
-  Var v -> (bindacc, acc, [v])
+      then getSignals bindacc inputAcc acc e
+      else getSignals (a : bindacc) inputAcc acc e
+  -- Add any top-level deconstructed input tuple mapping
+  Case (Var v) _ _ (Alt (DataAlt dc) b e : _) | elem v bindacc && isTupleDataCon dc ->
+    getSignals (b <> bindacc) ((v, b) : inputAcc) acc e
+  Var v -> (bindacc, inputAcc, acc, [v])
   -- NOTE: should verify that the function is tuple
   e ->
     let (_, args) = collectArgs e
@@ -253,7 +259,7 @@ getSignals bindacc acc = \case
                 _ -> Nothing
             )
             args
-     in (bindacc, acc, argvars)
+     in (bindacc, inputAcc, acc, argvars)
 
 -- | Resolve an application to a process, inputs and (potentially tupled) output
 getApplication ::
@@ -265,10 +271,10 @@ getApplication binds (output, expr) = (proc, input, output, splitTuples)
   (input, splitTuples, proc) = stripApps ([], Nothing) expr
   stripApps (inputs, split) = \case
     App e (Var arg)
-      | any (\bind -> bind == arg) binds ->
+      | elem arg binds ->
           stripApps (arg : inputs, split) e
     e@(Case (Var arg) _b _t ((Alt _ _ _e) : _))
-      | any (\bind -> bind == arg) binds ->
+      | elem arg binds ->
           (inputs, Just arg, e)
     e -> (inputs, split, e)
 
