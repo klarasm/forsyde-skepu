@@ -244,7 +244,7 @@ getSignals ::
 getSignals bindacc inputAcc acc = \case
   -- A signal should be fully applied, i.e. it should not have any input argument
   Let (NonRec b e) inExpr
-    | length (fst $ extractTypes [] $ varType b) == 0 ->
+    | isSignal (b, e) ->
         getSignals (b : bindacc) inputAcc ((b, e) : acc) inExpr
   -- Likely a process, handled separately
   Let (NonRec _ _) inExpr
@@ -253,7 +253,7 @@ getSignals bindacc inputAcc acc = \case
   -- A Rec binding should not contain any process since they are supposed to be
   -- self-contained. Therefore filter binds with inputs.
   Let (Rec sigs) inExpr ->
-    let sigs' = filter ((0 ==) . length . fst . extractTypes [] . varType . fst) sigs
+    let sigs' = filter isSignal sigs
         b = map fst sigs'
      in getSignals (b <> bindacc) inputAcc (sigs' <> acc) inExpr
   Lam a e ->
@@ -277,6 +277,8 @@ getSignals bindacc inputAcc acc = \case
             )
             args
      in (bindacc, inputAcc, acc, argvars)
+  where
+    isSignal = (0 ==) . length . fst . extractTypes [] . varType . fst
 
 -- | Resolve an application to a process, inputs and (potentially tupled) output
 getApplication ::
