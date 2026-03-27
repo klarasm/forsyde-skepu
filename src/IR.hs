@@ -226,6 +226,8 @@ getProcesses acc = \case
   Let bind expr -> case makeProcess (Right bind) of
     Nothing -> getProcesses acc expr
     Just proc -> getProcesses (proc : acc) expr
+  Case (Var _) _ _ (Alt (DataAlt dc) _ e : _) | isTupleDataCon dc ->
+    getProcesses acc e
   -- Function composition
   App (App (App (App (App (Var v) _) _) _) e1) e2 | "." == (getOccString . getName) v ->
     let procs = getProcesses acc e1
