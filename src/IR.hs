@@ -50,10 +50,14 @@ instance Show System where
       <> (unlines . map ("\t" <>) . lines . concat . map (("\n" <>) . show) $ vertices)
       <> ", "
       <> (unlines . map ("\t" <>) . lines . concat . map (("\n" <>) . show) $ edges)
-      <> ", "
+      <> ", dependencies = "
       <> show graph
-      <> ", "
-      <> show schedule
+      <> "\n, "
+      <> case schedule of
+        Just sched ->
+          "schedule = "
+            <> show sched
+        _ -> "unschedulable"
       <> ")"
 
 -- A process constructor applied to a function, but not connected in a network.
