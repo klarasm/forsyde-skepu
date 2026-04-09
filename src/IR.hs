@@ -36,6 +36,7 @@ data System = System
   , vertices :: [Vertex]
   , edges :: [Edge]
   , graph :: Maybe G.Graph
+  , schedule :: Maybe [Int]
   }
 instance Show System where
   show System{..} =
@@ -50,9 +51,9 @@ instance Show System where
       <> ", "
       <> (unlines . map ("\t" <>) . lines . concat . map (("\n" <>) . show) $ edges)
       <> ", "
-      <> (show $ G.topSort <$> graph)
+      <> show graph
       <> ", "
-      <> (show $ G.scc <$> graph)
+      <> show schedule
       <> ")"
 
 -- A process constructor applied to a function, but not connected in a network.
@@ -135,6 +136,7 @@ translate f =
     , vertices = []
     , edges = []
     , graph = Nothing
+    , schedule = Nothing
     }
  where
   processes = foldr makeProcesses [] . map Right $ f
@@ -237,6 +239,8 @@ translateExpr procs expr' = out
     case collectArgs body of
       (Var func, _args) -> getOccString func == "delay"
       _ -> False
+  selfEdges = any (\Edge {source, target} -> source == target) edges
+  schedulable = not selfEdges && (all (\(G.Node _ forest) -> forest == []) . G.scc $ graph)
   out =
     if length edges /= 0 -- also ensures that minVert and maxVert is defined
       then
@@ -248,6 +252,7 @@ translateExpr procs expr' = out
             , vertices
             , edges
             , graph = Just graph
+            , schedule = if schedulable then pure $ G.topSort graph else Nothing
             }
       else Nothing
 
