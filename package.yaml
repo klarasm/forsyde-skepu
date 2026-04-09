@@ -27,6 +27,7 @@ dependencies:
 - ghc-paths ==0.1.0.*
 - optparse-applicative ==0.18.1.*
 - syb ==0.7.2.*
+- containers ==0.7
 
 ghc-options:
 - -Wall

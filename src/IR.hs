@@ -27,12 +27,15 @@ import GHC.Types.Var (isTyCoVar)
 import GHC.Types.Name (getName, getOccString)
 import GHC.Utils.Outputable (showPprUnsafe)
 
+import qualified Data.Graph as G
+
 data System = System
   { inputs :: [Var]
   , outputs :: [Var]
   , processes :: [Process]
   , vertices :: [Vertex]
   , edges :: [Edge]
+  , graph :: Maybe G.Graph
   }
 instance Show System where
   show System{..} =
@@ -46,6 +49,10 @@ instance Show System where
       <> (unlines . map ("\t" <>) . lines . concat . map (("\n" <>) . show) $ vertices)
       <> ", "
       <> (unlines . map ("\t" <>) . lines . concat . map (("\n" <>) . show) $ edges)
+      <> ", "
+      <> (show $ G.topSort <$> graph)
+      <> ", "
+      <> (show $ G.scc <$> graph)
       <> ")"
 
 -- A process constructor applied to a function, but not connected in a network.
@@ -90,6 +97,10 @@ instance Show Vertex where
       <> ", "
       <> either showPprUnsafe show process
       <> ")"
+instance Eq Vertex where
+  (==) Vertex {id = id1} Vertex {id = id2} = id1 == id2
+instance Ord Vertex where
+  compare Vertex {id = id1} Vertex {id = id2} = compare id1 id2
 
 -- An edge (signal) inside a system.
 -- Can only refer to local vertices.
@@ -123,6 +134,7 @@ translate f =
     , processes
     , vertices = []
     , edges = []
+    , graph = Nothing
     }
  where
   processes = mapMaybe (makeProcess . Right) f
@@ -207,8 +219,12 @@ translateExpr expr' = out
           <> map (\(v, m) -> (Var v, [v], m)) inputMap
           <> map (\v -> (Var v, [v], [])) outputs
   edges = mconcat . map (makeEdge vertices) $ binds
+  minVert = foldr1 min vertices
+  maxVert = foldr1 max vertices
+  sEdges = map (\Edge {source, target} -> (source, target)) edges
+  graph = G.buildG (minVert.id, maxVert.id) sEdges
   out =
-    if length edges /= 0
+    if length edges /= 0 -- also ensures that minVert and maxVert is defined
       then
         pure $
           System
@@ -217,6 +233,7 @@ translateExpr expr' = out
             , processes
             , vertices
             , edges
+            , graph = Just graph
             }
       else Nothing
 
