@@ -373,9 +373,6 @@ makeVertex procs i = \case
       , inputs
       , outputs
       }
-  -- Function composition
-  -- (App (App (App (App (App (Var v) _) _) _) e1) e2, inputs, outputs) | "." == (getOccString . getName) v ->
-  --   undefined
   -- An application of an inline process definition
   (expr, inputs, outputs) -> do
     process <- liftM Right $ makeProcess procs (Left (expr, inputs, outputs))
