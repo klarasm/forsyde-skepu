@@ -183,7 +183,7 @@ makeProcess = \case
             { binder = Just bind
             , inports
             , outports
-            , subsystem = translateExpr expr
+            , subsystem = translateExpr [] expr
             , body = expr
             }
       else Nothing
@@ -195,15 +195,15 @@ makeProcess = \case
             { binder = Nothing
             , inports = map (Port . varType) inputs
             , outports = map (Port . varType) outputs
-            , subsystem = translateExpr expr
+            , subsystem = translateExpr [] expr
             , body = expr
             }
 
 typeOrConstraint :: Var -> Bool
 typeOrConstraint v = isTyCoVar v || (isPredTy . varType) v
 
-translateExpr :: CoreExpr -> Maybe System
-translateExpr expr' = out
+translateExpr :: [Process] -> CoreExpr -> Maybe System
+translateExpr procs expr' = out
  where
   (_, inputs', expr) = collectTyAndValBinders expr'
   inputs = filter (not . typeOrConstraint) inputs'
@@ -221,8 +221,18 @@ translateExpr expr' = out
   edges = mconcat . map (makeEdge vertices) $ binds
   minVert = foldr1 min vertices
   maxVert = foldr1 max vertices
-  sEdges = map (\Edge {source, target} -> (source, target)) edges
+  sEdges = mapMaybe (\Edge {source, target} ->
+    if isDelayVertex source then Nothing else Just $ (source, target)) edges
   graph = G.buildG (minVert.id, maxVert.id) sEdges
+  isDelayVertex vid = case filter (\Vertex {id = pid} -> pid == vid) vertices of
+    Vertex { process = Right proc } : _ -> isDelayProcess proc
+    Vertex { process = Left var } : _ ->
+      any isDelayProcess . filter (\Process { binder } -> binder == pure var) $ procs <> processes
+    _ -> False
+  isDelayProcess Process { body } =
+    case collectArgs body of
+      (Var func, _args) -> getOccString func == "delay"
+      _ -> False
   out =
     if length edges /= 0 -- also ensures that minVert and maxVert is defined
       then
