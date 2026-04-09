@@ -137,7 +137,11 @@ translate f =
     , graph = Nothing
     }
  where
-  processes = mapMaybe (makeProcess . Right) f
+  processes = foldr makeProcesses [] . map Right $ f
+  makeProcesses bind acc =
+    case makeProcess acc bind of
+      Nothing -> acc
+      Just p -> p : acc
 
 makePorts :: ([Type], [Type]) -> ([Port], [Port])
 makePorts (inty, outty) =
@@ -170,8 +174,8 @@ extractTypes acc = \case
 A process should be self-contained, i.e. not have any communication outside
 of its arguments and return.
 -}
-makeProcess :: Either (CoreExpr, [Var], [Var]) CoreBind -> Maybe Process
-makeProcess = \case
+makeProcess :: [Process] -> Either (CoreExpr, [Var], [Var]) CoreBind -> Maybe Process
+makeProcess procs = \case
   Right (Rec _) -> Nothing
   Right (NonRec bind expr) ->
   -- A process needs both an input and an output. A function with just an
@@ -183,7 +187,7 @@ makeProcess = \case
             { binder = Just bind
             , inports
             , outports
-            , subsystem = translateExpr [] expr
+            , subsystem = translateExpr procs expr
             , body = expr
             }
       else Nothing
@@ -195,7 +199,7 @@ makeProcess = \case
             { binder = Nothing
             , inports = map (Port . varType) inputs
             , outports = map (Port . varType) outputs
-            , subsystem = translateExpr [] expr
+            , subsystem = translateExpr procs expr
             , body = expr
             }
 
@@ -213,7 +217,7 @@ translateExpr procs expr' = out
   processes = getProcesses [] expr
   vertices =
     mapMaybe id $
-      zipWith makeVertex [0 ..] $
+      zipWith (makeVertex (procs <> processes)) [0 ..] $
         apps
           <> map (\v -> (Var v, [], [v])) inputs
           <> map (\(v, m) -> (Var v, [v], m)) inputMap
@@ -250,7 +254,7 @@ translateExpr procs expr' = out
 getProcesses :: [Process] -> CoreExpr -> [Process]
 getProcesses acc = \case
   Lam _ e -> getProcesses acc e
-  Let bind expr -> case makeProcess (Right bind) of
+  Let bind expr -> case makeProcess acc (Right bind) of
     Nothing -> getProcesses acc expr
     Just proc -> getProcesses (proc : acc) expr
   Case (Var _) _ _ (Alt (DataAlt dc) _ e : _) | isTupleDataCon dc ->
@@ -350,8 +354,8 @@ resolveTuples apps (proc, inputs, output, _) = Just (proc, inputs, outputs)
       lookup out (zip args (zip [0 ..] $ repeat var))
     _ -> Nothing
 
-makeVertex :: Int -> (CoreExpr, [Var], [Var]) -> Maybe Vertex
-makeVertex i = \case
+makeVertex :: [Process] -> Int -> (CoreExpr, [Var], [Var]) -> Maybe Vertex
+makeVertex procs i = \case
   -- An application of a non-inline process
   (Var bind, inputs, outputs) ->
     Just $ Vertex
@@ -365,7 +369,7 @@ makeVertex i = \case
   --   undefined
   -- An application of an inline process definition
   (expr, inputs, outputs) -> do
-    process <- liftM Right $ makeProcess (Left (expr, inputs, outputs))
+    process <- liftM Right $ makeProcess procs (Left (expr, inputs, outputs))
     pure $ Vertex
       { id = i
       , process
