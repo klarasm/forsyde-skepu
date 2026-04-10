@@ -24,8 +24,9 @@ import GHC.Core.TyCon
 import GHC.Core.DataCon
 import GHC.Core.Type
 import GHC.Types.Var (isTyCoVar)
-import GHC.Types.Name (getName, getOccString)
+import GHC.Types.Name (nameModule, getName, getOccString)
 import GHC.Utils.Outputable (showPprUnsafe)
+import GHC.Unit.Module (moduleName, moduleNameString)
 
 import qualified Data.Graph as G
 
@@ -232,6 +233,9 @@ makeProcess procs = \case
 
 typeOrConstraint :: Var -> Bool
 typeOrConstraint v = isTyCoVar v || (isPredTy . varType) v
+
+moduleString :: Var -> String
+moduleString = moduleNameString . moduleName . nameModule . getName
 
 translateExpr :: [Process] -> CoreExpr -> Maybe System
 translateExpr procs expr' = out
