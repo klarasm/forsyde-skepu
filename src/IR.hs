@@ -329,11 +329,11 @@ getApplication ::
   (CoreExpr, [Var], Var, Maybe Var)
 getApplication binds (output, expr) = (proc, input, output, splitTuples)
  where
-  (input, splitTuples, proc) = stripApps ([], Nothing) expr
-  stripApps (inputs, split) = \case
+  (input, splitTuples, proc) = stripSigApps ([], Nothing) expr
+  stripSigApps (inputs, split) = \case
     App e (Var arg)
       | elem arg binds ->
-          stripApps (arg : inputs, split) e
+          stripSigApps (arg : inputs, split) e
     e@(Case (Var arg) _b _t ((Alt _ _ _e) : _))
       | elem arg binds ->
           (inputs, Just arg, e)
