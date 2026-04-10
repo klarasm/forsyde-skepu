@@ -29,6 +29,7 @@ import GHC.Utils.Outputable (showPprUnsafe)
 import GHC.Unit.Module (moduleName, moduleNameString)
 
 import qualified Data.Graph as G
+import Prettyprinter
 
 data System = System
   { inputs :: [Var]
@@ -40,26 +41,24 @@ data System = System
   , schedule :: Maybe [Int]
   }
 instance Show System where
-  show System{..} =
-    "System(inputs = "
-      <> showPprUnsafe inputs
-      <> ", outputs = "
-      <> showPprUnsafe outputs
-      <> ", "
-      <> (unlines . map ("\t" <>) . lines . concat . map (("\n" <>) . show) $ processes)
-      <> ", "
-      <> (unlines . map ("\t" <>) . lines . concat . map (("\n" <>) . show) $ vertices)
-      <> ", "
-      <> (unlines . map ("\t" <>) . lines . concat . map (("\n" <>) . show) $ edges)
-      <> ", dependencies = "
-      <> show graph
-      <> "\n, "
-      <> case schedule of
-        Just sched ->
-          "schedule = "
-            <> show sched
-        _ -> "unschedulable"
-      <> ")"
+  show = show . pretty
+instance Pretty System where
+  pretty System{..} =
+    nest 4 $
+      pretty "System"
+        <> tupled
+          [ pretty "inputs =" <+> (pretty . showPprUnsafe) inputs
+          , pretty "outputs =" <+> (pretty . showPprUnsafe) outputs
+          , pretty processes
+          , pretty vertices
+          , pretty edges
+          , pretty "dependencies =" <+> pretty (G.edges <$> graph)
+          , case schedule of
+              Just sched ->
+                pretty "schedule ="
+                  <+> pretty sched
+              _ -> pretty "unschedulable"
+          ]
 
 -- A process constructor applied to a function, but not connected in a network.
 data Process = Process
@@ -70,16 +69,17 @@ data Process = Process
   , body :: CoreExpr
   }
 instance Show Process where
-  show Process{..} =
-    "Process("
-      <> showPprUnsafe binder
-      <> ", inports = "
-      <> show inports
-      <> ", outports = "
-      <> show outports
-      <> ", "
-      <> maybe ("{" <> showPprUnsafe body <> "}") show subsystem
-      <> ")"
+  show = show . pretty
+instance Pretty Process where
+  pretty Process{..} =
+    nest 4 $
+      pretty "Process"
+        <> tupled
+          [ pretty . showPprUnsafe $ binder
+          , pretty "inports =" <+> pretty inports
+          , pretty "outports = " <+> pretty outports
+          , maybe (braces . pretty . showPprUnsafe $ body) pretty subsystem
+          ]
 
 -- A process connected in a network.
 -- It must therefore have at least an input and an output.
@@ -93,16 +93,17 @@ data Vertex = Vertex
   , outputs :: [Var]
   }
 instance Show Vertex where
-  show Vertex{id = i, ..} =
-    "Vertex("
-      <> show i
-      <> ", inputs = "
-      <> showPprUnsafe inputs
-      <> ", outputs = "
-      <> showPprUnsafe outputs
-      <> ", "
-      <> either showPprUnsafe show process
-      <> ")"
+  show = show . pretty
+instance Pretty Vertex where
+  pretty Vertex{id = i, ..} =
+    nest 2 $
+      pretty "Vertex"
+        <> tupled
+          [ pretty i
+          , pretty "inputs =" <+> (pretty . showPprUnsafe) inputs
+          , pretty "outputs =" <+> (pretty . showPprUnsafe) outputs
+          , either (pretty . showPprUnsafe) pretty process
+          ]
 instance Eq Vertex where
   (==) Vertex {id = id1} Vertex {id = id2} = id1 == id2
 instance Ord Vertex where
@@ -116,21 +117,26 @@ data Edge = Edge
   , target :: !Int
   }
 instance Show Edge where
-  show Edge{..} =
-    "Edge("
-      <> showPprUnsafe binder
-      <> ", "
-      <> show source
-      <> ", "
-      <> show target
-      <> ")"
+  show = show . pretty
+instance Pretty Edge where
+  pretty Edge{..} =
+    nest 2 $
+      pretty "Edge"
+        <> tupled
+          [ (pretty . showPprUnsafe) binder
+          , pretty source
+          , pretty target
+          ]
 
 data Port = Port
   { ty :: Type
   }
 instance Show Port where
-  show Port{..} =
-    "Port(" <> showPprUnsafe ty <> ")"
+  show = show . pretty
+instance Pretty Port where
+  pretty Port { ty } =
+    pretty "Port"
+      <> (parens . pretty . showPprUnsafe) ty
 
 translate :: CoreProgram -> System
 translate f =
