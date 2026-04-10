@@ -143,8 +143,8 @@ translate f =
     , schedule = Nothing
     }
  where
-  processes = foldr makeProcesses [] . map Right $ f
-  makeProcesses bind acc =
+  processes = reverse . foldl' makeProcesses [] . map Right $ f
+  makeProcesses acc bind =
     case makeProcess acc bind of
       Nothing -> acc
       Just p -> p : acc
