@@ -176,6 +176,23 @@ extractTypes acc = \case
     TyConApp v types | isTupleTyCon v -> reverse resacc <> types
     t -> reverse (t : resacc)
 
+-- Strip all Lams so we don't need to bother with non-eta-reduced processes.
+-- We con't count the type variables as those won't produce an App in the top
+-- level definition.
+stripLams :: Integer -> CoreExpr -> (Integer, CoreExpr)
+stripLams n expr = case expr of
+  -- Explicitly strips lambdas refering to type-level binders
+  Lam b e | typeOrConstraint b -> stripLams n e
+  Lam _ e | otherwise -> stripLams (n + 1) e
+  _ -> (n, expr)
+
+-- Strip n Apps if possible, otherwise Nothing
+stripApps :: Integer -> CoreExpr -> Maybe CoreExpr
+stripApps n expr = case expr of
+  App e _ | n > 0 -> stripApps (n - 1) e
+  _ | n > 0 -> Nothing
+  _ | otherwise -> Just expr
+
 {- | Make a process from a binding.
 A process should be self-contained, i.e. not have any communication outside
 of its arguments and return.
@@ -183,7 +200,7 @@ of its arguments and return.
 makeProcess :: [Process] -> Either (CoreExpr, [Var], [Var]) CoreBind -> Maybe Process
 makeProcess procs = \case
   Right (Rec _) -> Nothing
-  Right (NonRec bind expr) ->
+  Right (NonRec bind expr') ->
   -- A process needs both an input and an output. A function with just an
   -- output is a value
     if length inports /= 0 && length outports /= 0
@@ -198,6 +215,10 @@ makeProcess procs = \case
             }
       else Nothing
    where
+    (lams, expr'') = stripLams 0 expr'
+    expr = case stripApps lams expr'' of
+      Just e -> e
+      Nothing -> expr'
     (inports, outports) = makePorts . extractTypes [] $ varType bind
   Left (expr, inputs, outputs) ->
         Just
