@@ -384,19 +384,21 @@ getSignals bindacc inputAcc acc = \case
   Case (Var v) _ _ (Alt (DataAlt dc) b e : _) | elem v bindacc && isTupleDataCon dc ->
     getSignals (b <> bindacc) ((v, b) : inputAcc) acc e
   Var v -> (bindacc, inputAcc, acc, [v])
-  -- NOTE: should verify that the function is tuple
+  -- May be a tuple construction
   e ->
-    let (_, args) = collectArgs e
+    let (e', args) = collectArgs e
         argvars =
           mapMaybe
             ( \case
-                Var v | typeOrConstraint v -> Nothing
-                Var v | otherwise -> Just v
-                Type _ -> Nothing
+                Var v | not $ typeOrConstraint v -> Just v
                 _ -> Nothing
             )
             args
-     in (bindacc, inputAcc, acc, argvars)
+     in case e' of
+      -- Is this actually a tuple constructor?
+      Var i | (>1) . length . snd . extractTypes [] $ varType i ->
+        (bindacc, inputAcc, acc, argvars)
+      _ -> (bindacc, inputAcc, acc, [])
   where
     isSignal = (0 ==) . length . fst . extractTypes [] . varType . fst
 
