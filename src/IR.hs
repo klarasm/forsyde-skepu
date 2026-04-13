@@ -54,6 +54,8 @@ instance Show Id where
     Inline parent ix -> show parent <> "_" <> show ix
     where
       getString binder = getOccString binder <> "_" <> (show . getUnique) binder
+instance Pretty Id where
+  pretty = unsafeViaShow
 
 showSloppy :: Id -> String
 showSloppy = \case
@@ -95,6 +97,7 @@ data Process = Process
   { binder :: Id
   , inports :: [Port]
   , outports :: [Port]
+  , appliedInternal :: [Id]
   , subsystem :: Maybe System
   , body :: CoreExpr
   }
@@ -109,9 +112,10 @@ instance Pretty Process where
     nest 4 $
       pretty "Process"
         <> tupled
-          [ unsafeViaShow binder
+          [ pretty binder
           , pretty "inports =" <+> pretty inports
-          , pretty "outports = " <+> pretty outports
+          , pretty "outports =" <+> pretty outports
+          , pretty "appliedInternal =" <+> pretty appliedInternal
           , maybe (braces . pretty . showPprUnsafe $ body) pretty subsystem
           ]
 
@@ -253,6 +257,7 @@ makeProcess parent procs = \case
             , outports
             , subsystem = translateExpr (Direct bind) procs expr
             , body = expr
+            , appliedInternal = map Direct . getInternal [] $ expr
             }
       else Nothing
    where
@@ -269,7 +274,14 @@ makeProcess parent procs = \case
             , outports = map (Port . varType) outputs
             , subsystem = translateExpr parent procs expr
             , body = expr
+            , appliedInternal = map Direct . getInternal [] $ expr
             }
+
+getInternal :: [CoreBndr] -> CoreExpr -> [CoreBndr]
+getInternal acc = \case
+  App e (Var v) -> getInternal (v : acc) e
+  App e1 _ -> getInternal acc e1
+  _ -> acc
 
 typeOrConstraint :: Var -> Bool
 typeOrConstraint v = isTyCoVar v || (isPredTy . varType) v
