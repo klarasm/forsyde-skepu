@@ -109,7 +109,7 @@ instance Pretty Process where
 -- to be unique inside the system.
 data Vertex = Vertex
   { id :: Int
-  , process :: Either Var Process
+  , process :: Either Id Process
   , inputs :: [Var]
   , outputs :: [Var]
   }
@@ -123,7 +123,7 @@ instance Pretty Vertex where
           [ pretty i
           , pretty "inputs =" <+> (pretty . showPprUnsafe) inputs
           , pretty "outputs =" <+> (pretty . showPprUnsafe) outputs
-          , either (pretty . showPprUnsafe) pretty process
+          , either (pretty . show) pretty process
           ]
 instance Eq Vertex where
   (==) Vertex {id = id1} Vertex {id = id2} = id1 == id2
@@ -289,7 +289,7 @@ translateExpr parent procs expr' = out
   isDelayVertex vid = case filter (\Vertex {id = pid} -> pid == vid) vertices of
     Vertex { process = Right proc } : _ -> isDelayProcess proc
     Vertex { process = Left var } : _ ->
-      any isDelayProcess . filter (\Process { binder } -> binder == Direct var) $ procs <> processes
+      any isDelayProcess . filter (\Process { binder } -> binder == var) $ procs <> processes
     _ -> False
   isDelayProcess Process { body } =
     case collectArgs body of
@@ -421,7 +421,7 @@ makeVertex parent procs ix = \case
   (Var bind, inputs, outputs) ->
     Just $ Vertex
       { id = ix
-      , process = Left bind
+      , process = Left (Direct bind)
       , inputs
       , outputs
       }
