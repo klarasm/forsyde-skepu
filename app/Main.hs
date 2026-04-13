@@ -1,13 +1,22 @@
+{-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE NamedFieldPuns #-}
+{-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE NoFieldSelectors #-}
 module Main (main) where
 
 import IR
 import Options.Applicative
+import qualified Prettyprinter as P
 import Util
 
 data Arguments = Arguments
   { inputFile :: String
   , outputCore :: Bool
   , outputIr :: Bool
+  , outputFiltered :: Bool
+  , process :: String
   }
 
 parseArguments :: Parser Arguments
@@ -15,7 +24,9 @@ parseArguments =
   Arguments
     <$> strArgument (metavar "input")
     <*> flag False True (long "output-core")
-    <*> flag True False (long "no-output-ir")
+    <*> flag False True (long "output-ir")
+    <*> flag True False (long "no-output-filtered")
+    <*> option (str >>= \s -> pure s) (long "process" <> value "system")
 
 argumentParser :: ParserInfo Arguments
 argumentParser =
@@ -26,12 +37,14 @@ argumentParser =
 main :: IO ()
 main = do
   arguments <- execParser argumentParser
-  (core, dflags) <- compileToCore Nothing (inputFile arguments)
-  if outputCore arguments
-    then putStrLn $ showPpr dflags core
-    else pure ()
+  (core, dflags) <- compileToCore Nothing (arguments.inputFile)
   let ir = translate core
-  if outputIr arguments
-    then print ir
+  let filtered = filterUnused arguments.process ir
+  if arguments.outputCore then putStrLn $ showPpr dflags core else pure ()
+  if arguments.outputIr then print ir else pure ()
+  if arguments.outputFiltered
+    then case filtered of
+      Just p -> (print . P.pretty) p
+      Nothing -> error $ "No such process: " <> arguments.process
     else pure ()
   pure ()
