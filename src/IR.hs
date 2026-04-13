@@ -315,8 +315,9 @@ translateExpr parent procs expr' = out
   isDelayVertex vid = case filter (\Vertex {id = pid} -> pid == vid) vertices of
     Vertex { process = Right proc } : _ -> isDelayProcess proc
     Vertex { process = Left var } : _ ->
-      any isDelayProcess . filter (\Process { binder } -> binder == var) $ procs <> processes
+      any isDelayProcess . procsFromId var $ procs <> processes
     _ -> False
+  procsFromId var = filter (\Process { binder } -> binder == var)
   isDelayProcess Process { body } =
     case collectArgs body of
       (Var func, _args) -> getOccString func == "delay"
