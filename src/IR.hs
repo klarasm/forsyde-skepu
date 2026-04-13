@@ -224,19 +224,13 @@ extractTypes acc = \case
 -- Strip all Lams so we don't need to bother with non-eta-reduced processes.
 -- We con't count the type variables as those won't produce an App in the top
 -- level definition.
-stripLams :: Integer -> CoreExpr -> (Integer, CoreExpr)
-stripLams n expr = case expr of
+stripLamApps :: CoreExpr -> CoreExpr
+stripLamApps expr = case expr of
   -- Explicitly strips lambdas refering to type-level binders
-  Lam b e | typeOrConstraint b -> stripLams n e
-  Lam _ e | otherwise -> stripLams (n + 1) e
-  _ -> (n, expr)
-
--- Strip n Apps if possible, otherwise Nothing
-stripApps :: Integer -> CoreExpr -> Maybe CoreExpr
-stripApps n expr = case expr of
-  App e _ | n > 0 -> stripApps (n - 1) e
-  _ | n > 0 -> Nothing
-  _ | otherwise -> Just expr
+  Lam b e | typeOrConstraint b -> stripLamApps e
+  -- Also strip matching Lam App pairs
+  Lam (arg) (App e (Var v)) | v == arg -> stripLamApps e
+  _ -> expr
 
 {- | Make a process from a binding.
 A process should be self-contained, i.e. not have any communication outside
@@ -261,10 +255,7 @@ makeProcess parent procs = \case
             }
       else Nothing
    where
-    (lams, expr'') = stripLams 0 expr'
-    expr = case stripApps lams expr'' of
-      Just e -> e
-      Nothing -> expr'
+    expr = stripLamApps expr'
     (inports, outports) = makePorts . extractTypes [] $ varType bind
   Left (ix, expr, inputs, outputs) ->
         Just
