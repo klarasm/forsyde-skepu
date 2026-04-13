@@ -251,7 +251,7 @@ makeProcess parent procs = \case
             , outports
             , subsystem = translateExpr (Direct bind) procs expr
             , body = expr
-            , appliedInternal = map Direct . getInternal [] $ expr
+            , appliedInternal = map Direct . getInternal procs [] $ expr
             }
       else Nothing
    where
@@ -265,13 +265,23 @@ makeProcess parent procs = \case
             , outports = map (Port . varType) outputs
             , subsystem = translateExpr parent procs expr
             , body = expr
-            , appliedInternal = map Direct . getInternal [] $ expr
+            , appliedInternal = map Direct . getInternal procs [] $ expr
             }
 
-getInternal :: [CoreBndr] -> CoreExpr -> [CoreBndr]
-getInternal acc = \case
-  App e (Var v) -> getInternal (v : acc) e
-  App e1 _ -> getInternal acc e1
+-- | Get all internal function applications of an expression
+-- This is used to not filter out internal process applications
+getInternal :: [Process] -> [CoreBndr] -> CoreExpr -> [CoreBndr]
+getInternal procs acc = \case
+  Lam _ e -> getInternal procs acc e
+  App (Var v1) (Var v2) | not (typeOrConstraint v1 || typeOrConstraint v2) ->
+    (v1 : v2 : acc)
+  App e (Var v) | not $ typeOrConstraint v ->
+    getInternal procs (v : acc) e
+  App (Var v) e | not $ typeOrConstraint v ->
+    getInternal procs (v : acc) e
+  App e1 e2 ->
+    let acc' = getInternal procs acc e2
+     in getInternal procs acc' e1
   _ -> acc
 
 typeOrConstraint :: Var -> Bool
