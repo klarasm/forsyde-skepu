@@ -12,12 +12,14 @@ module IR (
   Edge (..),
   Port (..),
   translate,
+  filterUnused,
 )
 where
 
 import Control.Monad
 import Data.List (sort)
 import Data.Maybe (mapMaybe)
+import qualified Data.Set as S
 import GHC.Core
 import GHC.Core.TyCo.Rep
 import GHC.Core.TyCon
@@ -37,6 +39,7 @@ data Id
   | Direct CoreBndr
   | Nested Id CoreBndr
   | Inline Id Int
+  deriving (Ord)
 instance Eq Id where
   (==) Empty Empty = False
   (==) (Direct i1) (Direct i2) = i1 == i2
@@ -51,6 +54,12 @@ instance Show Id where
     Inline parent ix -> show parent <> "_" <> show ix
     where
       getString binder = getOccString binder <> "_" <> (show . getUnique) binder
+
+showSloppy :: Id -> String
+showSloppy = \case
+  Empty -> ""
+  Direct binder -> getOccString binder
+  other -> show other
 
 data System = System
   { inputs :: [Var]
@@ -89,6 +98,10 @@ data Process = Process
   , subsystem :: Maybe System
   , body :: CoreExpr
   }
+instance Eq Process where
+  (==) Process { binder = b1 } Process { binder = b2} = b1 == b2
+instance Ord Process where
+  compare Process { binder = b1 } Process { binder = b2} = compare b1 b2
 instance Show Process where
   show = show . pretty
 instance Pretty Process where
@@ -440,3 +453,37 @@ makeEdge vertices bind = [Edge bind] <*> source <*> targets
  where
   source = [i | Vertex{id = i, outputs} <- vertices, bind `elem` outputs]
   targets = [i | Vertex{id = i, inputs} <- vertices, bind `elem` inputs]
+
+-- | Gather all processes referenced by the one corresponding to the string
+filterUnused :: String -> System -> Maybe (Process, [Process])
+filterUnused procname System { .. } =
+  case filter (procNamed procname) processes of
+    p@Process { .. } : _ -> case subsystem of
+      Just s ->
+        let (subsys, used) = filterUnusedSystem (S.fromList processes, mempty) s
+         in Just (p { subsystem = Just subsys }, S.elems used)
+      _ -> Nothing
+    _ -> Nothing
+  where
+    procNamed name Process { binder } = showSloppy binder == name
+
+filterUnusedSystem :: (S.Set Process, S.Set Process) -> System -> (System, S.Set Process)
+filterUnusedSystem (reachable, used) s@System { .. } =
+  (s { processes = [], vertices = vertices' }, subsysUsed)
+  where
+    subsysUsed = (mconcat . S.elems . S.map update) used'
+    used' = usedByVertices used vertices
+    usedByVertices acc = (acc <>) . mconcat . map vertexBinder
+    vertices' = map removeInline vertices
+    vertexBinder Vertex { process } = case process of
+      Left p -> findProc p (reachable <> S.fromList processes)
+      Right p -> S.singleton p
+    findProc var = S.filter (\Process { binder } -> binder == var)
+    removeInline v@Vertex { process } = case process of
+      Right Process { binder } -> v { process = Left binder }
+      _ -> v
+    update p@Process { .. } = S.singleton p { subsystem = subsys } <> subsysUsed'
+      where
+        (subsys, subsysUsed') = case subsystem of
+          Just s' -> (\(a, b) -> (Just a, b)) . filterUnusedSystem (reachable, mempty) $ s'
+          Nothing -> (Nothing, mempty)
