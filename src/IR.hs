@@ -23,13 +23,34 @@ import GHC.Core.TyCo.Rep
 import GHC.Core.TyCon
 import GHC.Core.DataCon
 import GHC.Core.Type
-import GHC.Types.Var (isTyCoVar)
 import GHC.Types.Name (nameModule, getName, getOccString)
+import GHC.Types.Unique (getUnique)
+import GHC.Types.Var (isTyCoVar)
 import GHC.Utils.Outputable (showPprUnsafe)
 import GHC.Unit.Module (moduleName, moduleNameString)
 
 import qualified Data.Graph as G
 import Prettyprinter
+
+data Id
+  = Empty
+  | Direct CoreBndr
+  | Nested Id CoreBndr
+  | Inline Id Int
+instance Eq Id where
+  (==) Empty Empty = False
+  (==) (Direct i1) (Direct i2) = i1 == i2
+  (==) (Nested i1 b1) (Nested i2 b2) = b1 == b2 && i1 == i2
+  (==) (Inline i1 ix1) (Inline i2 ix2) = ix1 == ix2 && i1 == i2
+  (==) _ _ = False
+instance Show Id where
+  show = \case
+    Empty -> ""
+    Direct binder -> getString binder
+    Nested parent binder -> show parent <> "_" <> getString binder
+    Inline parent ix -> show parent <> "_" <> show ix
+    where
+      getString binder = getOccString binder <> "_" <> (show . getUnique) binder
 
 data System = System
   { inputs :: [Var]
@@ -62,7 +83,7 @@ instance Pretty System where
 
 -- A process constructor applied to a function, but not connected in a network.
 data Process = Process
-  { binder :: Maybe CoreBndr
+  { binder :: Id
   , inports :: [Port]
   , outports :: [Port]
   , subsystem :: Maybe System
@@ -75,7 +96,7 @@ instance Pretty Process where
     nest 4 $
       pretty "Process"
         <> tupled
-          [ pretty . showPprUnsafe $ binder
+          [ unsafeViaShow binder
           , pretty "inports =" <+> pretty inports
           , pretty "outports = " <+> pretty outports
           , maybe (braces . pretty . showPprUnsafe $ body) pretty subsystem
@@ -150,9 +171,9 @@ translate f =
     , schedule = Nothing
     }
  where
-  processes = reverse . foldl' makeProcesses [] . map Right $ f
-  makeProcesses acc bind =
-    case makeProcess acc bind of
+  processes = reverse . foldl' (makeProcesses Empty) [] . map Right $ f
+  makeProcesses parent acc bind =
+    case makeProcess parent acc bind of
       Nothing -> acc
       Just p -> p : acc
 
@@ -204,8 +225,8 @@ stripApps n expr = case expr of
 A process should be self-contained, i.e. not have any communication outside
 of its arguments and return.
 -}
-makeProcess :: [Process] -> Either (CoreExpr, [Var], [Var]) CoreBind -> Maybe Process
-makeProcess procs = \case
+makeProcess :: Id -> [Process] -> Either (Int, CoreExpr, [Var], [Var]) CoreBind -> Maybe Process
+makeProcess parent procs = \case
   Right (Rec _) -> Nothing
   Right (NonRec bind expr') ->
   -- A process needs both an input and an output. A function with just an
@@ -214,10 +235,10 @@ makeProcess procs = \case
       then
         Just
           Process
-            { binder = Just bind
+            { binder = Direct bind
             , inports
             , outports
-            , subsystem = translateExpr procs expr
+            , subsystem = translateExpr (Direct bind) procs expr
             , body = expr
             }
       else Nothing
@@ -227,13 +248,13 @@ makeProcess procs = \case
       Just e -> e
       Nothing -> expr'
     (inports, outports) = makePorts . extractTypes [] $ varType bind
-  Left (expr, inputs, outputs) ->
+  Left (ix, expr, inputs, outputs) ->
         Just
           Process
-            { binder = Nothing
+            { binder = Inline parent ix
             , inports = map (Port . varType) inputs
             , outports = map (Port . varType) outputs
-            , subsystem = translateExpr procs expr
+            , subsystem = translateExpr parent procs expr
             , body = expr
             }
 
@@ -243,18 +264,18 @@ typeOrConstraint v = isTyCoVar v || (isPredTy . varType) v
 moduleString :: Var -> String
 moduleString = moduleNameString . moduleName . nameModule . getName
 
-translateExpr :: [Process] -> CoreExpr -> Maybe System
-translateExpr procs expr' = out
+translateExpr :: Id -> [Process] -> CoreExpr -> Maybe System
+translateExpr parent procs expr' = out
  where
   (_, inputs', expr) = collectTyAndValBinders expr'
   inputs = filter (not . typeOrConstraint) inputs'
   (binds, inputMap, sigs, outputs) = getSignals inputs [] [] expr
   apps' = map (getApplication binds) sigs
   apps = mapMaybe (resolveTuples apps') apps'
-  processes = getProcesses [] expr
+  processes = getProcesses parent [] expr
   vertices =
     mapMaybe id $
-      zipWith (makeVertex (procs <> processes)) [0 ..] $
+      zipWith (makeVertex parent (procs <> processes)) [0 ..] $
         apps
           <> map (\v -> (Var v, [], [v])) inputs
           <> map (\(v, m) -> (Var v, [v], m)) inputMap
@@ -268,7 +289,7 @@ translateExpr procs expr' = out
   isDelayVertex vid = case filter (\Vertex {id = pid} -> pid == vid) vertices of
     Vertex { process = Right proc } : _ -> isDelayProcess proc
     Vertex { process = Left var } : _ ->
-      any isDelayProcess . filter (\Process { binder } -> binder == pure var) $ procs <> processes
+      any isDelayProcess . filter (\Process { binder } -> binder == Direct var) $ procs <> processes
     _ -> False
   isDelayProcess Process { body } =
     case collectArgs body of
@@ -291,18 +312,18 @@ translateExpr procs expr' = out
             }
       else Nothing
 
-getProcesses :: [Process] -> CoreExpr -> [Process]
-getProcesses acc = \case
-  Lam _ e -> getProcesses acc e
-  Let bind expr -> case makeProcess acc (Right bind) of
-    Nothing -> getProcesses acc expr
-    Just proc -> getProcesses (proc : acc) expr
+getProcesses :: Id -> [Process] -> CoreExpr -> [Process]
+getProcesses parent acc = \case
+  Lam _ e -> getProcesses parent acc e
+  Let bind expr -> case makeProcess parent acc (Right bind) of
+    Nothing -> getProcesses parent acc expr
+    Just proc -> getProcesses parent (proc : acc) expr
   Case (Var _) _ _ (Alt (DataAlt dc) _ e : _) | isTupleDataCon dc ->
-    getProcesses acc e
+    getProcesses parent acc e
   -- Function composition
   App (App (App (App (App (Var v) _) _) _) e1) e2 | "." == (getOccString . getName) v ->
-    let procs = getProcesses acc e1
-     in getProcesses procs e2
+    let procs = getProcesses parent acc e1
+     in getProcesses parent procs e2
   _ -> acc
 
 {- | Get the applied signals of a subsystem
@@ -394,21 +415,21 @@ resolveTuples apps (proc, inputs, output, _) = Just (proc, inputs, outputs)
       lookup out (zip args (zip [0 ..] $ repeat var))
     _ -> Nothing
 
-makeVertex :: [Process] -> Int -> (CoreExpr, [Var], [Var]) -> Maybe Vertex
-makeVertex procs i = \case
+makeVertex :: Id -> [Process] -> Int -> (CoreExpr, [Var], [Var]) -> Maybe Vertex
+makeVertex parent procs ix = \case
   -- An application of a non-inline process
   (Var bind, inputs, outputs) ->
     Just $ Vertex
-      { id = i
+      { id = ix
       , process = Left bind
       , inputs
       , outputs
       }
   -- An application of an inline process definition
   (expr, inputs, outputs) -> do
-    process <- liftM Right $ makeProcess procs (Left (expr, inputs, outputs))
+    process <- liftM Right $ makeProcess parent procs (Left (ix, expr, inputs, outputs))
     pure $ Vertex
-      { id = i
+      { id = ix
       , process
       , inputs
       , outputs
