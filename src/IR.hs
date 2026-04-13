@@ -483,13 +483,21 @@ filterUnusedSystem :: (S.Set Process, S.Set Process) -> System -> (System, S.Set
 filterUnusedSystem (reachable, used) s@System { .. } =
   (s { processes = [], vertices = vertices' }, subsysUsed)
   where
+    processSet = S.fromList processes
     subsysUsed = (mconcat . S.elems . S.map update) used'
     used' = usedByVertices used vertices
-    usedByVertices acc = (acc <>) . mconcat . map vertexBinder
+    usedByVertices acc = (acc <>) . mconcat . map vertexProcs
     vertices' = map removeInline vertices
-    vertexBinder Vertex { process } = case process of
-      Left p -> findProc p (reachable <> S.fromList processes)
-      Right p -> S.singleton p
+    vertexProcs Vertex { process } = case process of
+      Left p ->
+        let procs = findProc p (reachable <> processSet)
+            internalApps = (mconcat . S.elems . S.map internal) procs
+         in procs <> internalApps
+      Right p ->
+        let internalApps = internal p
+         in S.singleton p <> internalApps
+    internal Process {appliedInternal} =
+      mconcat $ findProc <$> appliedInternal <*> [reachable <> processSet]
     findProc var = S.filter (\Process { binder } -> binder == var)
     removeInline v@Vertex { process } = case process of
       Right Process { binder } -> v { process = Left binder }
