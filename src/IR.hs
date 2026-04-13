@@ -299,19 +299,18 @@ translateExpr parent procs expr' = out
   apps' = map (getApplication binds) sigs
   apps = mapMaybe (resolveTuples apps') apps'
   processes = getProcesses parent [] expr
+  noiovertices = mapMaybe id . zipWith (makeVertex parent (procs <> processes)) [0 ..] $ apps
+  noioedges = mconcat . map (makeEdge noiovertices) $ binds
   vertices =
-    mapMaybe id $
-      zipWith (makeVertex parent (procs <> processes)) [0 ..] $
-        apps
-          <> map (\v -> (Var v, [], [v])) inputs
-          <> map (\(v, m) -> (Var v, [v], m)) inputMap
-          <> map (\v -> (Var v, [v], [])) outputs
+    mapMaybe id . zipWith (makeVertex parent (procs <> processes)) [0 ..] $
+      apps
+        <> map (\v -> (Var v, [], [v])) inputs
+        <> map (\(v, m) -> (Var v, [v], m)) inputMap
+        <> map (\v -> (Var v, [v], [])) outputs
   edges = mconcat . map (makeEdge vertices) $ binds
-  minVert = foldr1 min vertices
-  maxVert = foldr1 max vertices
   sEdges = mapMaybe (\Edge {source, target} ->
     if isDelayVertex source then Nothing else Just $ (source, target)) edges
-  graph = G.buildG (minVert.id, maxVert.id) sEdges
+  graph = G.buildG (0, length vertices - 1) sEdges
   isDelayVertex vid = case filter (\Vertex {id = pid} -> pid == vid) vertices of
     Vertex { process = Right proc } : _ -> isDelayProcess proc
     Vertex { process = Left var } : _ ->
@@ -325,7 +324,7 @@ translateExpr parent procs expr' = out
   selfEdges = any (\Edge {source, target} -> source == target) edges
   schedulable = not selfEdges && (all (\(G.Node _ forest) -> forest == []) . G.scc $ graph)
   out =
-    if length edges /= 0 -- also ensures that minVert and maxVert is defined
+    if length noioedges /= 0
       then
         pure $
           System
