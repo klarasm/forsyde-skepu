@@ -272,6 +272,7 @@ makeProcess parent procs = \case
 -- This is used to not filter out internal process applications
 getInternal :: [Process] -> [CoreBndr] -> CoreExpr -> [CoreBndr]
 getInternal procs acc = \case
+  Let _ e -> getInternal procs acc e
   Lam _ e -> getInternal procs acc e
   App (Var v1) (Var v2) | not (typeOrConstraint v1 || typeOrConstraint v2) ->
     (v1 : v2 : acc)
