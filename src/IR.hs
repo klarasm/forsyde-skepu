@@ -325,7 +325,7 @@ translateExpr parent procs expr' = out
   selfEdges = any (\Edge {source, target} -> source == target) edges
   schedulable = not selfEdges && (all (\(G.Node _ forest) -> forest == []) . G.scc $ graph)
   out =
-    if length noioedges /= 0
+    if length noioedges /= 0 || (length noiovertices /= 0 && length edges /= 0)
       then
         pure $
           System
