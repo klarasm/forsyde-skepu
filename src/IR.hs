@@ -474,11 +474,13 @@ makeEdge vertices bind = [Edge bind] <*> source <*> targets
 filterUnused :: String -> System -> Maybe (Process, [Process])
 filterUnused procname System { .. } =
   case filter (procNamed procname) processes of
-    p@Process { .. } : _ -> case subsystem of
-      Just s ->
-        let (subsys, used) = filterUnusedSystem (S.fromList processes, mempty) s
-         in Just (p { subsystem = Just subsys }, S.elems used)
-      _ -> Just (p, [])
+    p@Process { .. } : _ ->
+      let internal = findInternal (S.fromList processes) p
+       in case subsystem of
+        Just s ->
+          let (subsys, used) = filterUnusedSystem (S.fromList processes, mempty) s
+           in Just (p { subsystem = Just subsys }, S.elems (used <> internal))
+        _ -> Just (p, S.elems internal)
     _ -> Nothing
   where
     procNamed name Process { binder } = showSloppy binder == name
@@ -495,14 +497,11 @@ filterUnusedSystem (reachable, used) s@System { .. } =
     vertexProcs Vertex { process } = case process of
       Left p ->
         let procs = findProc p (reachable <> processSet)
-            internalApps = (mconcat . S.elems . S.map internal) procs
+            internalApps = (mconcat . S.elems . S.map (findInternal $ reachable <> processSet)) procs
          in procs <> internalApps
       Right p ->
-        let internalApps = internal p
+        let internalApps = (findInternal $ reachable <> processSet) p
          in S.singleton p <> internalApps
-    internal Process {appliedInternal} =
-      mconcat $ findProc <$> appliedInternal <*> [reachable <> processSet]
-    findProc var = S.filter (\Process { binder } -> binder == var)
     removeInline v@Vertex { process } = case process of
       Right Process { binder } -> v { process = Left binder }
       _ -> v
@@ -511,3 +510,9 @@ filterUnusedSystem (reachable, used) s@System { .. } =
         (subsys, subsysUsed') = case subsystem of
           Just s' -> (\(a, b) -> (Just a, b)) . filterUnusedSystem (reachable, mempty) $ s'
           Nothing -> (Nothing, mempty)
+
+findProc :: Id -> S.Set Process -> S.Set Process
+findProc var = S.filter (\Process { binder } -> binder == var)
+findInternal :: S.Set Process -> Process -> S.Set Process
+findInternal reachable Process {appliedInternal} =
+  mconcat $ findProc <$> appliedInternal <*> [reachable]
