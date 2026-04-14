@@ -249,24 +249,31 @@ makeProcess parent procs = \case
             { binder = Direct bind
             , inports
             , outports
-            , subsystem = translateExpr (Direct bind) procs expr
-            , body = expr
-            , appliedInternal = map Direct . getInternal procs [] $ expr
+            , subsystem
+            , body
+            , appliedInternal = case subsystem of
+              Just _ -> []
+              Nothing -> map Direct . getInternal procs [] $ body
             }
       else Nothing
-   where
-    expr = stripLamApps expr'
-    (inports, outports) = makePorts . extractTypes [] $ varType bind
-  Left (ix, expr, inputs, outputs) ->
+    where
+      body = stripLamApps expr'
+      subsystem = translateExpr (Direct bind) procs body
+      (inports, outports) = makePorts . extractTypes [] $ varType bind
+  Left (ix, body, inputs, outputs) ->
         Just
           Process
             { binder = Inline parent ix
             , inports = map (Port . varType) inputs
             , outports = map (Port . varType) outputs
-            , subsystem = translateExpr parent procs expr
-            , body = expr
-            , appliedInternal = map Direct . getInternal procs [] $ expr
+            , subsystem
+            , body
+            , appliedInternal = case subsystem of
+              Just _ -> []
+              Nothing -> map Direct . getInternal procs [] $ body
             }
+    where
+      subsystem = translateExpr parent procs body
 
 -- | Get all internal function applications of an expression
 -- This is used to not filter out internal process applications
