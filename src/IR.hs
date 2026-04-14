@@ -285,6 +285,8 @@ getInternal procs acc = \case
   Let (Rec b) e2 ->
     let acc' = foldr (\(_, e1) a -> getInternal procs a e1) acc b
      in getInternal procs acc' e2
+  Case _ _ _ alts ->
+    foldr (\(Alt _ _ e1) a -> getInternal procs a e1) acc alts
   Lam _ e -> getInternal procs acc e
   Var v | not $ typeOrConstraint v -> v : acc
   App e1 e2 ->
