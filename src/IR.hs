@@ -272,7 +272,12 @@ makeProcess parent procs = \case
 -- This is used to not filter out internal process applications
 getInternal :: [Process] -> [CoreBndr] -> CoreExpr -> [CoreBndr]
 getInternal procs acc = \case
-  Let _ e -> getInternal procs acc e
+  Let (NonRec _ e1) e2 ->
+    let acc' = getInternal procs acc e1
+     in getInternal procs acc' e2
+  Let (Rec b) e2 ->
+    let acc' = foldr (\(_, e1) a -> getInternal procs a e1) acc b
+     in getInternal procs acc' e2
   Lam _ e -> getInternal procs acc e
   Var v | not $ typeOrConstraint v -> v : acc
   App e1 e2 ->
