@@ -478,7 +478,7 @@ filterUnused procname System { .. } =
       Just s ->
         let (subsys, used) = filterUnusedSystem (S.fromList processes, mempty) s
          in Just (p { subsystem = Just subsys }, S.elems used)
-      _ -> Nothing
+      _ -> Just (p, [])
     _ -> Nothing
   where
     procNamed name Process { binder } = showSloppy binder == name
