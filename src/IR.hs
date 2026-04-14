@@ -294,7 +294,9 @@ translateExpr parent procs expr' = out
   (binds, inputMap, sigs, outputs) = getSignals inputs [] [] expr
   apps' = map (getApplication binds) sigs
   apps = mapMaybe (resolveTuples apps') apps'
-  processes = getProcesses parent [] expr
+  processes =
+    filter (\Process{binder} -> not $ elem binder (Direct <$> binds)) $
+      getProcesses parent [] expr
   noiovertices = mapMaybe id . zipWith (makeVertex parent (procs <> processes)) [0 ..] $ apps
   noioedges = mconcat . map (makeEdge noiovertices) $ binds
   vertices =
