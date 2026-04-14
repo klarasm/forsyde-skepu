@@ -240,9 +240,9 @@ makeProcess :: Id -> [Process] -> Either (Int, CoreExpr, [Var], [Var]) CoreBind 
 makeProcess parent procs = \case
   Right (Rec _) -> Nothing
   Right (NonRec bind expr') ->
-  -- A process needs both an input and an output. A function with just an
-  -- output is a value
-    if length inports /= 0 && length outports /= 0
+  -- A process needs at least an output. The case with no inputs is technically
+  -- a signal, but this can be useful for e.g. generators.
+    if length outports /= 0
       then
         Just
           Process
