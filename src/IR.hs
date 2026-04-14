@@ -470,7 +470,8 @@ filterUnused :: String -> System -> Maybe (Process, [Process])
 filterUnused procname System { .. } =
   case filter (procNamed procname) processes of
     p@Process { .. } : _ ->
-      let internal = findInternal (S.fromList processes) p
+      let internal' = S.elems . findInternal (S.fromList processes) $ p
+          internal = mconcat . map (getUsedAndLiftNested $ S.fromList processes) $ internal'
        in case subsystem of
         Just s ->
           let (subsys, used) = filterUnusedSystem (S.fromList processes, mempty) s
@@ -485,7 +486,7 @@ filterUnusedSystem (reachable, used) s@System { .. } =
   (s { processes = [], vertices = vertices' }, subsysUsed)
   where
     processSet = S.fromList processes
-    subsysUsed = (mconcat . S.elems . S.map update) used'
+    subsysUsed = (mconcat . S.elems . S.map (getUsedAndLiftNested reachable)) used'
     used' = usedByVertices used vertices
     usedByVertices acc = (acc <>) . mconcat . map vertexProcs
     vertices' = map removeInline vertices
@@ -500,14 +501,16 @@ filterUnusedSystem (reachable, used) s@System { .. } =
     removeInline v@Vertex { process } = case process of
       Right Process { binder } -> v { process = Left binder }
       _ -> v
-    update p@Process { .. } = S.singleton p { subsystem = subsys } <> subsysUsed'
-      where
-        (subsys, subsysUsed') = case subsystem of
-          Just s' -> (\(a, b) -> (Just a, b)) . filterUnusedSystem (reachable, mempty) $ s'
-          Nothing -> (Nothing, mempty)
 
 findProc :: Id -> S.Set Process -> S.Set Process
 findProc var = S.filter (\Process { binder } -> binder == var)
 findInternal :: S.Set Process -> Process -> S.Set Process
 findInternal reachable Process {appliedInternal} =
   mconcat $ findProc <$> appliedInternal <*> [reachable]
+
+getUsedAndLiftNested :: S.Set Process -> Process -> S.Set Process
+getUsedAndLiftNested reachable p@Process { .. } = S.singleton p { subsystem = subsys } <> subsysUsed'
+  where
+    (subsys, subsysUsed') = case subsystem of
+      Just s' -> (\(a, b) -> (Just a, b)) . filterUnusedSystem (reachable, mempty) $ s'
+      Nothing -> (Nothing, mempty)
