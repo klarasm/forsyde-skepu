@@ -274,12 +274,7 @@ getInternal :: [Process] -> [CoreBndr] -> CoreExpr -> [CoreBndr]
 getInternal procs acc = \case
   Let _ e -> getInternal procs acc e
   Lam _ e -> getInternal procs acc e
-  App (Var v1) (Var v2) | not (typeOrConstraint v1 || typeOrConstraint v2) ->
-    (v1 : v2 : acc)
-  App e (Var v) | not $ typeOrConstraint v ->
-    getInternal procs (v : acc) e
-  App (Var v) e | not $ typeOrConstraint v ->
-    getInternal procs (v : acc) e
+  Var v | not $ typeOrConstraint v -> v : acc
   App e1 e2 ->
     let acc' = getInternal procs acc e2
      in getInternal procs acc' e1
