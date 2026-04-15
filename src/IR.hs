@@ -345,18 +345,10 @@ translateExpr parent procs expr' = out
         <> map (\v -> (Var v, [v], [])) outputs
   edges = mconcat . map (makeEdge vertices) $ binds
   sEdges = mapMaybe (\Edge {source, target} ->
-    if isDelayVertex source then Nothing else Just $ (source, target)) edges
+    if isDelayVertex (procs <> processes) vertices source
+      then Nothing
+      else Just $ (source, target)) edges
   graph = G.buildG (0, length vertices - 1) sEdges
-  isDelayVertex vid = case filter (\Vertex {id = pid} -> pid == vid) vertices of
-    Vertex { process = Right proc } : _ -> isDelayProcess proc
-    Vertex { process = Left var } : _ ->
-      any isDelayProcess . procsFromId var $ procs <> processes
-    _ -> False
-  procsFromId var = filter (\Process { binder } -> binder == var)
-  isDelayProcess Process { body } =
-    case collectArgs body of
-      (Var func, _args) -> getOccString func == "delay"
-      _ -> False
   selfEdges = any (\Edge {source, target} -> source == target) edges
   schedulable = not selfEdges && (all (\(G.Node _ forest) -> forest == []) . G.scc $ graph)
   out =
@@ -373,6 +365,22 @@ translateExpr parent procs expr' = out
             , schedule = if schedulable then pure $ G.topSort graph else Nothing
             }
       else Nothing
+
+procsFromId :: Id -> [Process] -> [Process]
+procsFromId var = filter (\Process { binder } -> binder == var)
+
+isDelayVertex :: [Process] -> [Vertex] -> Int -> Bool
+isDelayVertex processes vertices vid = case filter (\Vertex {id = pid} -> pid == vid) vertices of
+  Vertex { process = Right proc } : _ -> isDelayProcess proc
+  Vertex { process = Left var } : _ ->
+    any isDelayProcess . procsFromId var $ processes
+  _ -> False
+
+isDelayProcess :: Process -> Bool
+isDelayProcess Process { body } =
+  case collectArgs body of
+    (Var func, _args) -> getOccString func == "delay"
+    _ -> False
 
 getProcesses :: Id -> [Process] -> CoreExpr -> [Process]
 getProcesses parent acc = \case
