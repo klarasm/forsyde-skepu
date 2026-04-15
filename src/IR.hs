@@ -216,11 +216,13 @@ makePort = \case
     case getOccString v of
       "Signal" -> Signal (makePort ft_res) t (moduleString . getName $ v)
       "Vector" -> Vector (makePort ft_res) t
+      "Matrix" -> Vector (Vector (makePort ft_res) t) t
       _ -> Opaque t
   t@(TyConApp con app) ->
     case (getOccString con, app) of
       ("Signal", t':_) -> Signal (makePort t') t (moduleString . tyConName $ con)
       ("Vector", t':_) -> Vector (makePort t') t
+      ("Matrix", t':_) -> Vector (Vector (makePort t') t) t
       _ -> Opaque t
   t -> Opaque t
 
