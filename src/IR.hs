@@ -25,7 +25,7 @@ import GHC.Core.TyCo.Rep
 import GHC.Core.TyCon
 import GHC.Core.DataCon
 import GHC.Core.Type
-import GHC.Types.Name (nameModule, getName, getOccString)
+import GHC.Types.Name (Name, nameModule, getName, getOccString)
 import GHC.Types.Unique (getUnique)
 import GHC.Types.Var (isTyCoVar)
 import GHC.Utils.Outputable (showPprUnsafe)
@@ -166,15 +166,24 @@ instance Pretty Edge where
           , pretty target
           ]
 
-data Port = Port
-  { ty :: Type
-  }
+data Port
+  = Opaque Type
+  | Signal Port Type String
+  | Vector Port Type
+
 instance Show Port where
   show = show . pretty
 instance Pretty Port where
-  pretty Port { ty } =
-    pretty "Port"
-      <> (parens . pretty . showPprUnsafe) ty
+  pretty = \case
+    Opaque ty ->
+      pretty "OpaquePort"
+        <> (parens . pretty . showPprUnsafe) ty
+    Signal inner _ _ ->
+      pretty "SignalPort"
+        <> (parens . pretty) inner
+    Vector inner _ ->
+      pretty "VectorPort"
+        <> (parens . pretty) inner
 
 translate :: CoreProgram -> System
 translate f =
@@ -198,8 +207,22 @@ makePorts :: ([Type], [Type]) -> ([Port], [Port])
 makePorts (inty, outty) =
   (inports, outports)
  where
-  inports = map Port inty
-  outports = map Port outty
+  inports = map makePort inty
+  outports = map makePort outty
+
+makePort :: Type -> Port
+makePort = \case
+  t@(FunTy _ _ (TyVarTy v) ft_res) ->
+    case getOccString v of
+      "Signal" -> Signal (makePort ft_res) t (moduleString . getName $ v)
+      "Vector" -> Vector (makePort ft_res) t
+      _ -> Opaque t
+  t@(TyConApp con app) ->
+    case (getOccString con, app) of
+      ("Signal", t':_) -> Signal (makePort t') t (moduleString . tyConName $ con)
+      ("Vector", t':_) -> Vector (makePort t') t
+      _ -> Opaque t
+  t -> Opaque t
 
 {- | Extract all arguments and returns
 If the last return is a tuple type application, return the application list
@@ -264,8 +287,8 @@ makeProcess parent procs = \case
         Just
           Process
             { binder = Inline parent ix
-            , inports = map (Port . varType) inputs
-            , outports = map (Port . varType) outputs
+            , inports
+            , outports
             , subsystem
             , body
             , appliedInternal = case subsystem of
@@ -273,6 +296,7 @@ makeProcess parent procs = \case
               Nothing -> map Direct . getInternal procs [] $ body
             }
     where
+      (inports, outports) = makePorts (varType <$> inputs, varType <$> outputs)
       subsystem = translateExpr parent procs body
 
 -- | Get all internal function applications of an expression
@@ -297,8 +321,8 @@ getInternal procs acc = \case
 typeOrConstraint :: Var -> Bool
 typeOrConstraint v = isTyCoVar v || (isPredTy . varType) v
 
-moduleString :: Var -> String
-moduleString = moduleNameString . moduleName . nameModule . getName
+moduleString :: Name -> String
+moduleString = moduleNameString . moduleName . nameModule
 
 translateExpr :: Id -> [Process] -> CoreExpr -> Maybe System
 translateExpr parent procs expr' = out
