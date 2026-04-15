@@ -57,6 +57,16 @@ instance Show Id where
 instance Pretty Id where
   pretty = unsafeViaShow
 
+instance Semigroup Id where
+  (<>) Empty i = i
+  (<>) i Empty = i
+  (<>) i (Direct b) = Nested i b
+  (<>) i1 (Inline i2 ix) = Inline (i1 <> i2) ix
+  (<>) i1 (Nested i2 b) = Nested (i1 <> i2) b
+
+instance Monoid Id where
+  mempty = Empty
+
 showSloppy :: Id -> String
 showSloppy = \case
   Empty -> ""
