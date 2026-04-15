@@ -23,9 +23,9 @@ parseArguments :: Parser Arguments
 parseArguments =
   Arguments
     <$> strArgument (metavar "input")
-    <*> flag False True (long "output-core")
-    <*> flag False True (long "output-ir")
-    <*> flag True False (long "no-output-filtered")
+    <*> (flag False True (long "output-core") <|> flag' False (long "no-output-core"))
+    <*> (flag False True (long "output-ir") <|> flag' False (long "no-output-ir"))
+    <*> (flag True True (long "output-filtered") <|> flag' False (long "no-output-filtered"))
     <*> option (str >>= \s -> pure s) (long "process" <> value "system")
 
 argumentParser :: ParserInfo Arguments
