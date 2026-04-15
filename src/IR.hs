@@ -4,6 +4,7 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE NoFieldSelectors #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 
 module IR (
   System (..),
@@ -11,6 +12,7 @@ module IR (
   Vertex (..),
   Edge (..),
   Port (..),
+  Id (..),
   translate,
   filterUnused,
 )
@@ -28,11 +30,15 @@ import GHC.Core.Type
 import GHC.Types.Name (Name, nameModule, getName, getOccString)
 import GHC.Types.Unique (getUnique)
 import GHC.Types.Var (isTyCoVar)
+import GHC.Types.Literal (Literal (..))
 import GHC.Utils.Outputable (showPprUnsafe)
 import GHC.Unit.Module (moduleName, moduleNameString)
 
 import qualified Data.Graph as G
 import Prettyprinter
+
+import Synthesis
+import qualified CIR
 
 data Id
   = Empty
@@ -590,3 +596,83 @@ getUsedAndLiftNested reachable p@Process { .. } = S.singleton p { subsystem = su
     (subsys, subsysUsed') = case subsystem of
       Just s' -> (\(a, b) -> (Just a, b)) . filterUnusedSystem (reachable, mempty) $ s'
       Nothing -> (Nothing, mempty)
+
+portToC :: Port -> CIR.Type
+portToC = \case
+  Signal a _ _ -> portToC a
+  Vector _ _ -> undefined
+  Opaque t -> case t of
+    TyVarTy v | getOccString v == "Int" -> CIR.TInt
+    TyVarTy v | getOccString v == "Integer" -> CIR.TInt
+    TyVarTy v | getOccString v == "Float" -> CIR.TFloat
+    TyVarTy v | getOccString v == "Double" -> CIR.TFloat
+    TyConApp v [] | (getOccString . tyConName) v == "Int" -> CIR.TInt
+    TyConApp v [] | (getOccString . tyConName) v == "Integer" -> CIR.TInt
+    TyConApp v [] | (getOccString . tyConName) v == "Float" -> CIR.TFloat
+    TyConApp v [] | (getOccString . tyConName) v == "Double" -> CIR.TFloat
+    TyVarTy v -> error $ "TyVarTy: " <> showPprUnsafe v
+    TyConApp v a -> error $ "TyConApp: " <> showPprUnsafe v <> " " <> showPprUnsafe a
+    _t -> error $ "Something else: " <> showPprUnsafe _t
+
+varToCDef :: Var -> (CIR.Type, String)
+varToCDef v =
+  let port = makePort . varType $ v
+      ty = portToC port
+      name = getOccString v
+   in (ty, name)
+
+argToCDef :: Var -> (CIR.Type, String)
+argToCDef = (\(t, n) -> (CIR.TPointer t, n)) . varToCDef
+
+getDelayExpr :: CoreExpr -> Maybe CoreExpr
+getDelayExpr = \case
+  App (App (Var v) _) e | isDelayVar v -> Just e
+  _ -> Nothing
+
+delayExprToC :: CoreExpr -> CIR.Expression
+delayExprToC = \case
+  App (Var _) (Lit (LitNumber _ i)) -> CIR.EInt . fromIntegral $ i
+  _ -> undefined
+
+instance Synthesizable Process Id where
+  synthesize procs p@Process { .. } (newC, allC) =
+    case filter (\Context { from } -> binder == from) allC of
+    c : _ -> (c : newC, allC)
+    _ ->
+      case subsystem of
+        Nothing ->
+          let inDefs = zip (map (CIR.TPointer . portToC) inports) $ map (("input_"<>) . show) [0 :: Int ..]
+              outDefs = zip (map (CIR.TPointer . portToC) outports) $ map (("output_"<>) . show) [0 :: Int ..]
+              context = Context
+                { from = binder
+                , ret = CIR.TVoid
+                , name = show binder
+                , params = inDefs <> outDefs
+                , delayStorage = []
+                , body = CIR.SScope [] -- Change
+                }
+           in (context : newC, context : allC)
+        Just System { .. } ->
+          let procs' = filter (/=p) procs
+              (_subsysNew, allC1) = foldr (synthesize procs') (newC, allC) procs'
+              inDefs = map argToCDef inputs
+              outDefs = map argToCDef outputs
+              delays = mapMaybe (delayVertex procs) vertices
+              delayProcs = mconcat . map (delayProc procs) $ delays
+              delayBodies = sequence . map (getDelayExpr . \Process { body = b } -> b) $ delayProcs
+              delayExprs = map delayExprToC <$> delayBodies
+              delaySigs = mconcat . map (\v@Vertex { outputs = outputs' } -> if length outputs == 1 then outputs' else error $ "invalid delay outputs: " <> show v) $ delays
+              delayTypes = map argToCDef delaySigs
+              delayDefs = delayExprs >>= \_c -> Just $ ((\(a, b) c -> (a, b, c)) <$> delayTypes) <*> _c
+              context =
+                Context
+                  { from = binder
+                  , ret = CIR.TVoid
+                  , name = show binder
+                  , params = inDefs <> outDefs
+                  , delayStorage = case delayDefs of
+                    Just d -> d
+                    Nothing -> error "delay mismatch"
+                  , body = CIR.SScope [] -- Change
+                  }
+          in (context : newC, context : allC1)

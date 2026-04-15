@@ -6,6 +6,7 @@
 {-# LANGUAGE NoFieldSelectors #-}
 module Main (main) where
 
+import Synthesis
 import IR
 import Options.Applicative
 import qualified Prettyprinter as P
@@ -42,9 +43,9 @@ main = do
   let filtered = filterUnused arguments.process ir
   if arguments.outputCore then putStrLn $ showPpr dflags core else pure ()
   if arguments.outputIr then print ir else pure ()
-  if arguments.outputFiltered
-    then case filtered of
-      Just p -> (print . P.pretty) p
-      Nothing -> error $ "No such process: " <> arguments.process
-    else pure ()
+  case filtered of
+    Just p@(m, r) -> do
+      if arguments.outputFiltered then (print . P.pretty) p else pure ()
+      print . P.pretty $ synthesize r m ([] :: [Context Process Id], [])
+    Nothing -> error $ "No such process: " <> arguments.process
   pure ()
