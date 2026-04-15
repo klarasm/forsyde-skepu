@@ -372,26 +372,32 @@ procsFromId :: Id -> [Process] -> [Process]
 procsFromId var = filter (\Process { binder } -> binder == var)
 
 isDelayVertex :: [Process] -> [Vertex] -> Int -> Bool
-isDelayVertex processes vertices vid = case delayVertex processes vertices vid of
-  Just _ -> True
-  Nothing -> False
+isDelayVertex processes vertices vid =
+  case mapMaybe (delayVertex processes) . filter (\Vertex {id = i} -> i == vid) $ vertices of
+    _ : [] -> True
+    _ -> False
 
-delayVertex :: [Process] -> [Vertex] -> Int -> Maybe Vertex
-delayVertex processes vertices vid = case filter (\Vertex {id = pid} -> pid == vid) vertices of
-  v@Vertex { process = Right proc } : _ ->
-    if isDelayProcess proc
-      then Just v
-      else Nothing
-  v@Vertex { process = Left var } : _ ->
-    if any isDelayProcess . procsFromId var $ processes
-      then Just v
-      else Nothing
+delayVertex :: [Process] -> Vertex -> Maybe Vertex
+delayVertex processes v = case delayProc processes v of
+  _ : _ -> Just v
   _ -> Nothing
+
+delayProc :: [Process] -> Vertex -> [Process]
+delayProc processes = \case
+  Vertex { process = Right proc } ->
+    if isDelayProcess proc then [proc] else []
+  Vertex { process = Left var } ->
+    filter isDelayProcess . procsFromId var $ processes
+
+isDelayVar :: Var -> Bool
+isDelayVar v =
+  getOccString v == "delay"
+    && ((moduleString . getName) v == "ForSyDe.Atom.MoC.SY.Lib")
 
 isDelayProcess :: Process -> Bool
 isDelayProcess Process { body } =
   case collectArgs body of
-    (Var func, _args) -> getOccString func == "delay"
+    (Var func, _args) -> isDelayVar func
     _ -> False
 
 getProcesses :: Id -> [Process] -> CoreExpr -> [Process]
