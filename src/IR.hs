@@ -370,11 +370,21 @@ procsFromId :: Id -> [Process] -> [Process]
 procsFromId var = filter (\Process { binder } -> binder == var)
 
 isDelayVertex :: [Process] -> [Vertex] -> Int -> Bool
-isDelayVertex processes vertices vid = case filter (\Vertex {id = pid} -> pid == vid) vertices of
-  Vertex { process = Right proc } : _ -> isDelayProcess proc
-  Vertex { process = Left var } : _ ->
-    any isDelayProcess . procsFromId var $ processes
-  _ -> False
+isDelayVertex processes vertices vid = case delayVertex processes vertices vid of
+  Just _ -> True
+  Nothing -> False
+
+delayVertex :: [Process] -> [Vertex] -> Int -> Maybe Vertex
+delayVertex processes vertices vid = case filter (\Vertex {id = pid} -> pid == vid) vertices of
+  v@Vertex { process = Right proc } : _ ->
+    if isDelayProcess proc
+      then Just v
+      else Nothing
+  v@Vertex { process = Left var } : _ ->
+    if any isDelayProcess . procsFromId var $ processes
+      then Just v
+      else Nothing
+  _ -> Nothing
 
 isDelayProcess :: Process -> Bool
 isDelayProcess Process { body } =
