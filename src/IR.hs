@@ -691,6 +691,11 @@ exprToCExpr args expr = case expr of
     let (init1, v1, dv1) = exprToVar 0 args e1
         (init2, v2, dv2) = exprToVar 1 args e2
      in (maybeToList init1 <> maybeToList init2, fun2Param (v1, dv1) (v2, dv2) $ getOccString f)
+  Var v -> case elemIndex v args of
+    Just ix ->
+        let arg = "input_" <> show ix
+         in ([], CIR.EDereference $ CIR.EVar arg)
+    Nothing -> error $ "Var not in args! " <> showPprUnsafe expr
   e -> error . showPprUnsafe $ e
   where
     fun2Param (v1, dv1) (v2, dv2) = \case
@@ -740,12 +745,15 @@ bodyToStatement = \case
             [ CIR.SAssign (CIR.EDereference $ CIR.EVar "output_0") $ ea1
             ]
     | getOccString v == "comb12" -> case e of
-      Lam b1 (App (App (App (App (Var v') _) _) _) e1) | getOccString v' == "(,)" ->
+      Lam b1 (App (App (App (App (Var v') _) _) e1) e2) | getOccString v' == "(,)" ->
         let (init1, ea1) = exprToCExpr [b1] e1
+            (init2, ea2) = exprToCExpr [b1] e2
          in
           CIR.SScope $
             init1 <>
+            init2 <>
             [ CIR.SAssign (CIR.EDereference $ CIR.EVar "output_0") $ ea1
+            , CIR.SAssign (CIR.EDereference $ CIR.EVar "output_1") $ ea2
             ]
       e' -> error . showPprUnsafe $ e'
     | otherwise ->
@@ -761,7 +769,6 @@ bodyToStatement = \case
   App (Var v) e ->
     error $ "1App(" <> show (Direct v) <> "): " <> showPprUnsafe e
   e -> error . showPprUnsafe $ e
-  -- _ -> CIR.SScope []
 
 instance Synthesizable Process Id where
   synthesize procs p@Process { .. } (newC, allC) =
