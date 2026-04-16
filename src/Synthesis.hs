@@ -139,12 +139,12 @@ exprToCExpr counter args expr = case expr of
       Just arg ->
          (counter, [], CIR.ECall (getOccString f) [arg])
       Nothing -> error "Var not in args!"
-  App (App (Var f) _) (Var v) | not $ typeOrConstraint v ->
+  App (App (Var f) _) (Var v) | not $ typeOrConstraint $ Var v ->
     case varToArg args v of
       Just arg ->
          (counter, [], CIR.ECall (getOccString f) [arg])
       Nothing -> error $ "Var not in args! " <> showPprUnsafe expr
-  App (App (Var f) _) _ ->
+  App (App (Var f) t1) t2 | typeOrConstraint t1 && typeOrConstraint t2 ->
     let v1 = CIR.EVar "input_0"
         v2 = CIR.EVar "input_1"
         dv1 = CIR.EDereference v1

@@ -269,7 +269,7 @@ extractTypes acc = \case
 stripLamApps :: CoreExpr -> CoreExpr
 stripLamApps expr = case expr of
   -- Explicitly strips lambdas refering to type-level binders
-  Lam b e | typeOrConstraint b -> stripLamApps e
+  Lam b e | typeOrConstraint (Var b) -> stripLamApps e
   -- Also strip matching Lam App pairs
   Lam (arg) (App e (Var v)) | v == arg -> stripLamApps e
   _ -> expr
@@ -331,14 +331,17 @@ getInternal procs acc = \case
   Case _ _ _ alts ->
     foldr (\(Alt _ _ e1) a -> getInternal procs a e1) acc alts
   Lam _ e -> getInternal procs acc e
-  Var v | not $ typeOrConstraint v -> v : acc
+  Var v | not $ typeOrConstraint (Var v) -> v : acc
   App e1 e2 ->
     let acc' = getInternal procs acc e2
      in getInternal procs acc' e1
   _ -> acc
 
-typeOrConstraint :: Var -> Bool
-typeOrConstraint v = isTyCoVar v || (isPredTy . varType) v
+typeOrConstraint :: CoreExpr -> Bool
+typeOrConstraint = \case
+  Var v -> isTyCoVar v || (isPredTy . varType) v
+  Type _ -> True
+  _ -> False
 
 moduleString :: Name -> String
 moduleString = moduleNameString . moduleName . nameModule
@@ -347,7 +350,7 @@ translateExpr :: Id -> [Process] -> CoreExpr -> Maybe System
 translateExpr parent procs expr' = out
  where
   (_, inputs', expr) = collectTyAndValBinders expr'
-  inputs = filter (not . typeOrConstraint) inputs'
+  inputs = filter (not . typeOrConstraint . Var) inputs'
   (binds, inputMap, sigs, outputs) = getSignals inputs [] [] expr
   apps' = map (getApplication binds) sigs
   apps = mapMaybe (resolveTuples apps') apps'
@@ -453,7 +456,7 @@ getSignals bindacc inputAcc acc = \case
         b = map fst sigs'
      in getSignals (b <> bindacc) inputAcc (sigs' <> acc) inExpr
   Lam a e ->
-    if typeOrConstraint a
+    if typeOrConstraint (Var a)
       then getSignals bindacc inputAcc acc e
       else getSignals (a : bindacc) inputAcc acc e
   -- Add any top-level deconstructed input tuple mapping
@@ -466,7 +469,7 @@ getSignals bindacc inputAcc acc = \case
         argvars =
           mapMaybe
             ( \case
-                Var v | not $ typeOrConstraint v -> Just v
+                Var v | not $ typeOrConstraint (Var v) -> Just v
                 _ -> Nothing
             )
             args
