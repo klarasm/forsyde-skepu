@@ -818,7 +818,7 @@ instance Synthesizable Process Id where
                     Nothing -> error "delay mismatch"
                   , body = CIR.SScope $ case schedStmts of
                     Just s -> localDefs <> s
-                    Nothing -> []
+                    Nothing -> error "invalid schedule"
                   }
           in (context : newC, context : allC1)
 
