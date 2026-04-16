@@ -9,7 +9,6 @@
 module Synthesis (
   Context (..),
   Synthesizable (..),
-  compose,
 ) where
 
 import GHC.Core
@@ -51,6 +50,7 @@ instance (Show a, Show b, Pretty a, Pretty b) => Pretty (Context a b) where
 class Synthesizable a b where
   -- may need to resolve a previously unresolved process as dependency
   synthesize :: [a] -> a -> ([Context a b], [Context a b]) -> ([Context a b], [Context a b])
+  compose :: ([Context a b], [Context a b]) -> CIR.Program
 
 portToC :: Port -> CIR.Type
 portToC = \case
@@ -278,54 +278,53 @@ instance Synthesizable Process Id where
                   }
           in (context : newC, context : allC1)
 
-compose :: ([Context Process Id], [Context Process Id]) -> CIR.Program
-compose ([], _) = error "Missing main context"
-compose (mainC, allC) = CIR.Prog $ [stdio] <> forwardDecls <> defs <> map main mainC
-  where
-    (forwardDecls, defs) = unzip . map contextToGlobal $ allC
-    stdio = CIR.GMacro "include" ["<stdio.h>"]
-    removePoint = \case
-      CIR.TPointer t -> t
-      t -> t
-    getInput ret (t, v) = CIR.SVarAssign ret (CIR.ECall "scanf" [CIR.EString $ typeToFormat t, CIR.EReference $ CIR.EVar v])
-    putOutput (t, v) = CIR.SExpr $ CIR.ECall "printf" [CIR.EString $ typeToFormat t <> "\\n", CIR.EVar v]
-    typeToFormat ty = case removePoint ty of
-      CIR.TInt -> "%d"
-      CIR.TFloat -> "%f"
-      CIR.TChar -> "%c"
-      t -> error $ "unknown format string for " <> show t
-    getArg (_, v) = CIR.EReference $ CIR.EVar v
-    statusVar = "status"
-    main Context{..} =
-      CIR.GFuncDef
-        Nothing
-        CIR.TInt
-        "main"
-        [(CIR.TInt, "argc"), (CIR.TPointer $ CIR.TPointer $ CIR.TChar, "argv")]
-        $ CIR.SScope
-        $ map (\(t, v, e) -> CIR.SVarDef (removePoint t) v e) (S.elems delayStorage)
-          <> [ CIR.SWhile (CIR.EInt 1) $
-                 CIR.SScope $
-                   map (\(t, v) -> CIR.SVarDecl (removePoint t) v) (inputs <> outputs)
-                     <> [CIR.SVarDecl CIR.TInt statusVar]
-                     <> map (getInput statusVar) inputs
-                     <> [ CIR.SIf
-                            (CIR.EBinOp CIR.Less (CIR.EVar statusVar) (CIR.EInt 1))
-                            (CIR.SScope [CIR.SBreak])
-                            Nothing
-                        ]
-                     <> [ CIR.SExpr $
-                            CIR.ECall (show from) $
-                              map getArg $
-                                inputs <> outputs <> (map (\(t, v, _) -> (t, v)) $ S.elems delayStorage)
-                        ]
-                     <> map putOutput outputs
-             ]
-          <> [CIR.SReturn $ Just $ CIR.EInt $ -1]
-    contextToGlobal Context { .. } =
-      ( CIR.GFuncDeclare (Just CIR.Static) CIR.TVoid (show from) $
-        inputs <> outputs <> (map (\(t, n, _) -> (t, n)) . S.elems) delayStorage
-      , CIR.GFuncDef (Just CIR.Static) CIR.TVoid (show from)
-          (inputs <> outputs <> (map (\(t, n, _) -> (t, n)) . S.elems) delayStorage)
-          body
-      )
+  compose ([], _) = error "Missing main context"
+  compose (mainC, allC) = CIR.Prog $ [stdio] <> forwardDecls <> defs <> map main mainC
+    where
+      (forwardDecls, defs) = unzip . map contextToGlobal $ allC
+      stdio = CIR.GMacro "include" ["<stdio.h>"]
+      removePoint = \case
+        CIR.TPointer t -> t
+        t -> t
+      getInput ret (t, v) = CIR.SVarAssign ret (CIR.ECall "scanf" [CIR.EString $ typeToFormat t, CIR.EReference $ CIR.EVar v])
+      putOutput (t, v) = CIR.SExpr $ CIR.ECall "printf" [CIR.EString $ typeToFormat t <> "\\n", CIR.EVar v]
+      typeToFormat ty = case removePoint ty of
+        CIR.TInt -> "%d"
+        CIR.TFloat -> "%f"
+        CIR.TChar -> "%c"
+        t -> error $ "unknown format string for " <> show t
+      getArg (_, v) = CIR.EReference $ CIR.EVar v
+      statusVar = "status"
+      main Context{..} =
+        CIR.GFuncDef
+          Nothing
+          CIR.TInt
+          "main"
+          [(CIR.TInt, "argc"), (CIR.TPointer $ CIR.TPointer $ CIR.TChar, "argv")]
+          $ CIR.SScope
+          $ map (\(t, v, e) -> CIR.SVarDef (removePoint t) v e) (S.elems delayStorage)
+            <> [ CIR.SWhile (CIR.EInt 1) $
+                   CIR.SScope $
+                     map (\(t, v) -> CIR.SVarDecl (removePoint t) v) (inputs <> outputs)
+                       <> [CIR.SVarDecl CIR.TInt statusVar]
+                       <> map (getInput statusVar) inputs
+                       <> [ CIR.SIf
+                              (CIR.EBinOp CIR.Less (CIR.EVar statusVar) (CIR.EInt 1))
+                              (CIR.SScope [CIR.SBreak])
+                              Nothing
+                          ]
+                       <> [ CIR.SExpr $
+                              CIR.ECall (show from) $
+                                map getArg $
+                                  inputs <> outputs <> (map (\(t, v, _) -> (t, v)) $ S.elems delayStorage)
+                          ]
+                       <> map putOutput outputs
+               ]
+            <> [CIR.SReturn $ Just $ CIR.EInt $ -1]
+      contextToGlobal Context { .. } =
+        ( CIR.GFuncDeclare (Just CIR.Static) CIR.TVoid (show from) $
+          inputs <> outputs <> (map (\(t, n, _) -> (t, n)) . S.elems) delayStorage
+        , CIR.GFuncDef (Just CIR.Static) CIR.TVoid (show from)
+            (inputs <> outputs <> (map (\(t, n, _) -> (t, n)) . S.elems) delayStorage)
+            body
+        )
