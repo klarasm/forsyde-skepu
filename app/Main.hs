@@ -28,7 +28,7 @@ parseArguments =
     <*> (flag False True (long "output-core") <|> flag' False (long "no-output-core"))
     <*> (flag False True (long "output-ir") <|> flag' False (long "no-output-ir"))
     <*> (flag False True (long "output-filtered") <|> flag' False (long "no-output-filtered"))
-    <*> (flag True True (long "output-composed") <|> flag' False (long "no-output-compsosed"))
+    <*> (flag True True (long "output-composed") <|> flag' False (long "no-output-composed"))
     <*> option str (long "process" <> value "system")
 
 argumentParser :: ParserInfo Arguments
