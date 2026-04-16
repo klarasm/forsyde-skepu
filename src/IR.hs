@@ -357,8 +357,6 @@ translateExpr parent procs expr' = out
   processes =
     filter (\Process{binder} -> not $ elem binder (Direct <$> binds)) $
       getProcesses parent [] expr
-  noiovertices = mapMaybe id . zipWith (makeVertex parent (procs <> processes)) [0 ..] $ apps
-  noioedges = mconcat . map (makeEdge noiovertices) $ binds
   vertices =
     mapMaybe id . zipWith (makeVertex parent (procs <> processes)) [0 ..] $
       apps <> map (\(v, m) -> (Var v, [v], m)) inputMap
@@ -371,7 +369,7 @@ translateExpr parent procs expr' = out
   selfEdges = any (\Edge {source, target} -> source == target) edges
   schedulable = not selfEdges && (all (\(G.Node _ forest) -> forest == []) . G.scc $ graph)
   out =
-    if length noioedges /= 0 || (length noiovertices /= 0 && length edges /= 0)
+    if length vertices /= 0
       then
         pure $
           System
