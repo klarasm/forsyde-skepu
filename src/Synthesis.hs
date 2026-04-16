@@ -20,7 +20,7 @@ import GHC.Types.Name (getOccString)
 import GHC.Utils.Outputable (showPprUnsafe)
 
 import Data.List (elemIndex, find)
-import Data.Maybe (mapMaybe, maybeToList)
+import Data.Maybe (mapMaybe)
 import IR
 import qualified CIR
 import qualified Data.Set as S
@@ -109,33 +109,40 @@ vertexToExpr pointers context Vertex { id = _, .. } = case process of
         then CIR.EVar . show $ Direct io
         else CIR.EReference . CIR.EVar . show $ Direct io
 
-exprToVar :: Integer -> [Var] -> CoreExpr -> (Maybe CIR.Statement, CIR.Expression, CIR.Expression)
-exprToVar tmpix args = \case
-  Var v -> case elemIndex v args of
-    Just ix -> (Nothing, CIR.EVar ("input_" <> show ix), CIR.EDereference $ CIR.EVar ("input_" <> show ix))
+exprToCExpr' :: Integer -> [Var] -> CoreExpr -> (Integer, [CIR.Statement], CIR.Expression)
+exprToCExpr' tmpix args = \case
+  Lit (LitNumber _ i) -> (tmpix, [], CIR.EInt $ fromIntegral i)
+  App _ (Lit (LitNumber _ i)) -> (tmpix, [], CIR.EInt $ fromIntegral i)
+  Var v -> case varToArg args v of
+    Just v' -> (tmpix, [], CIR.EDereference v')
     Nothing -> undefined
-  Lit (LitNumber _ i) -> intToVar i
-  App _ (Lit (LitNumber _ i)) -> intToVar i
-  App e1 e2 -> error $ "App " <> showPprUnsafe e1 <> " " <> showPprUnsafe e2
+  -- Binary operator (with type variables)
+  App (App (App (App (Var f) _) _) e1) e2  ->
+    let (tmpix1, stmts1, expr1) = exprToCExpr' tmpix args e1
+        (tmpix2, stmts2, expr2) = exprToCExpr' tmpix1 args e2
+     in case getOccString f of
+      "+" -> (tmpix2, stmts1 <> stmts2, CIR.EBinOp CIR.Add expr1 expr2)
+      "*" -> (tmpix2, stmts1 <> stmts2, CIR.EBinOp CIR.Multiply expr1 expr2)
+      "-" -> (tmpix2, stmts1 <> stmts2, CIR.EBinOp CIR.Subtract expr1 expr2)
+      "div" -> (tmpix2, stmts1 <> stmts2, CIR.EBinOp CIR.Divide expr1 expr2)
+      u -> error $ "Unknown function: " <> u
   e -> error . showPprUnsafe $ e
-  where
-    intToVar i = (Just $ CIR.SVarDef CIR.TInt ("tmp_" <> show tmpix) (CIR.EInt $ fromIntegral i), CIR.EVar ("tmp_" <> show tmpix), CIR.EInt $ fromIntegral i)
 
-varToArg :: Eq a => [a] -> a -> Maybe String
+varToArg :: Eq a => [a] -> a -> Maybe CIR.Expression
 varToArg args v =
-  elemIndex v args >>= \ix -> pure $ "input_" <> show ix
+  elemIndex v args >>= \ix -> pure . CIR.EVar $ "input_" <> show ix
 
 exprToCExpr :: Integer -> [Var] -> CoreExpr -> (Integer, [CIR.Statement], CIR.Expression)
 exprToCExpr counter args expr = case expr of
   App (App (App (Var f) _) _) (Var v) ->
     case varToArg args v of
       Just arg ->
-         (counter, [], CIR.ECall (getOccString f) [CIR.EVar arg])
+         (counter, [], CIR.ECall (getOccString f) [arg])
       Nothing -> error "Var not in args!"
   App (App (Var f) _) (Var v) | not $ typeOrConstraint v ->
     case varToArg args v of
       Just arg ->
-         (counter, [], CIR.ECall (getOccString f) [CIR.EVar arg])
+         (counter, [], CIR.ECall (getOccString f) [arg])
       Nothing -> error $ "Var not in args! " <> showPprUnsafe expr
   App (App (Var f) _) _ ->
     let v1 = CIR.EVar "input_0"
@@ -143,16 +150,7 @@ exprToCExpr counter args expr = case expr of
         dv1 = CIR.EDereference v1
         dv2 = CIR.EDereference v2
      in (counter, [], fun2Param (v1, dv1) (v2, dv2) $ getOccString f)
-  App (App (App (App (Var f) _) _) e1) e2 ->
-    let (init1, v1, dv1) = exprToVar counter args e1
-        (init2, v2, dv2) = exprToVar (counter+1) args e2
-     in (counter+2, maybeToList init1 <> maybeToList init2, fun2Param (v1, dv1) (v2, dv2) $ getOccString f)
-  Var v -> case elemIndex v args of
-    Just ix ->
-        let arg = "input_" <> show ix
-         in (counter, [], CIR.EDereference $ CIR.EVar arg)
-    Nothing -> error $ "Var not in args! " <> showPprUnsafe expr
-  e -> error . showPprUnsafe $ e
+  e -> exprToCExpr' counter args e
   where
     fun2Param (v1, dv1) (v2, dv2) = \case
       "+" -> CIR.EBinOp CIR.Add dv1 dv2
