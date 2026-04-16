@@ -110,23 +110,34 @@ vertexToExpr pointers context Vertex { id = _, .. } = case process of
         else CIR.EReference . CIR.EVar . show $ Direct io
 
 exprToCExpr' :: Integer -> [Var] -> CoreExpr -> (Integer, [CIR.Statement], CIR.Expression)
-exprToCExpr' tmpix args = \case
+exprToCExpr' tmpix args expr = case expr of
   Lit (LitNumber _ i) -> (tmpix, [], CIR.EInt $ fromIntegral i)
   App _ (Lit (LitNumber _ i)) -> (tmpix, [], CIR.EInt $ fromIntegral i)
   Var v -> case varToArg args v of
     Just v' -> (tmpix, [], CIR.EDereference v')
     Nothing -> undefined
-  -- Binary operator (with type variables)
-  App (App (App (App (Var f) _) _) e1) e2  ->
+  -- Unary operator/function (with type variables)
+  App (App (Var f) _) (Var v) | not $ typeOrConstraint $ Var v ->
+    case varToArg args v of
+      Just arg ->
+         (tmpix, [], CIR.ECall (getOccString f) [arg])
+      Nothing -> error $ "Var not in args! " <> showPprUnsafe expr
+  -- Binary operator/function (with type variables)
+  App (App (App (App (Var f) t1) t2) e1) e2 | typeOrConstraint t1 && typeOrConstraint t2 ->
     let (tmpix1, stmts1, expr1) = exprToCExpr' tmpix args e1
         (tmpix2, stmts2, expr2) = exprToCExpr' tmpix1 args e2
-     in case getOccString f of
-      "+" -> (tmpix2, stmts1 <> stmts2, CIR.EBinOp CIR.Add expr1 expr2)
-      "*" -> (tmpix2, stmts1 <> stmts2, CIR.EBinOp CIR.Multiply expr1 expr2)
-      "-" -> (tmpix2, stmts1 <> stmts2, CIR.EBinOp CIR.Subtract expr1 expr2)
-      "div" -> (tmpix2, stmts1 <> stmts2, CIR.EBinOp CIR.Divide expr1 expr2)
-      u -> error $ "Unknown function: " <> u
+     in resolveBinOp tmpix2 (stmts1 <> stmts2) expr1 expr2 $ getOccString f
   e -> error . showPprUnsafe $ e
+
+resolveBinOp ::
+  Integer -> [CIR.Statement] -> CIR.Expression -> CIR.Expression -> String
+  -> (Integer, [CIR.Statement], CIR.Expression)
+resolveBinOp tmpix stmts expr1 expr2 = \case
+  "+" -> (tmpix, stmts <> stmts, CIR.EBinOp CIR.Add expr1 expr2)
+  "*" -> (tmpix, stmts <> stmts, CIR.EBinOp CIR.Multiply expr1 expr2)
+  "-" -> (tmpix, stmts <> stmts, CIR.EBinOp CIR.Subtract expr1 expr2)
+  "div" -> (tmpix, stmts <> stmts, CIR.EBinOp CIR.Divide expr1 expr2)
+  u -> error $ "Unknown function: " <> u
 
 varToArg :: Eq a => [a] -> a -> Maybe CIR.Expression
 varToArg args v =
@@ -139,24 +150,13 @@ exprToCExpr counter args expr = case expr of
       Just arg ->
          (counter, [], CIR.ECall (getOccString f) [arg])
       Nothing -> error "Var not in args!"
-  App (App (Var f) _) (Var v) | not $ typeOrConstraint $ Var v ->
-    case varToArg args v of
-      Just arg ->
-         (counter, [], CIR.ECall (getOccString f) [arg])
-      Nothing -> error $ "Var not in args! " <> showPprUnsafe expr
   App (App (Var f) t1) t2 | typeOrConstraint t1 && typeOrConstraint t2 ->
     let v1 = CIR.EVar "input_0"
         v2 = CIR.EVar "input_1"
         dv1 = CIR.EDereference v1
         dv2 = CIR.EDereference v2
-     in (counter, [], fun2Param (v1, dv1) (v2, dv2) $ getOccString f)
+     in resolveBinOp counter [] dv1 dv2 $ getOccString f
   e -> exprToCExpr' counter args e
-  where
-    fun2Param (v1, dv1) (v2, dv2) = \case
-      "+" -> CIR.EBinOp CIR.Add dv1 dv2
-      "*" -> CIR.EBinOp CIR.Multiply dv1 dv2
-      "-" -> CIR.EBinOp CIR.Subtract dv1 dv2
-      f -> CIR.ECall f [v1, v2]
 
 bodyToStatement :: CoreExpr -> CIR.Statement
 bodyToStatement = \case
