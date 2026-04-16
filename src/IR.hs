@@ -15,6 +15,7 @@ module IR (
   Id (..),
   translate,
   filterUnused,
+  compose,
 )
 where
 
@@ -581,6 +582,9 @@ filterUnusedSystem (reachable, used) s@System { .. } =
       Right Process { binder } -> v { process = Left binder }
       _ -> v
 
+-- findProc :: (Foldable t, Monoid (f Process), Applicative f) => Id -> t Process -> f Process
+-- findProc vid = foldMap (\p@Process { binder = i } -> if vid == i then pure p else mempty)
+
 findProc :: Id -> S.Set Process -> S.Set Process
 findProc var = S.filter (\Process { binder } -> binder == var)
 findInternal :: S.Set Process -> Process -> S.Set Process
@@ -682,7 +686,7 @@ exprToCExpr args expr = case expr of
         v2 = CIR.EVar "input_1"
         dv1 = CIR.EDereference v1
         dv2 = CIR.EDereference v2
-     in ([], fun2Param (dv1, v1) (dv2, v2) $ getOccString f)
+     in ([], fun2Param (v1, dv1) (v2, dv2) $ getOccString f)
   App (App (App (App (Var f) _) _) e1) e2 ->
     let (init1, v1, dv1) = exprToVar 0 args e1
         (init2, v2, dv2) = exprToVar 1 args e2
@@ -771,8 +775,8 @@ instance Synthesizable Process Id where
               context = Context
                 { from = binder
                 , ret = CIR.TVoid
-                , name = show binder
-                , params = inDefs <> outDefs
+                , inputs = inDefs
+                , outputs = outDefs
                 , delayStorage = mempty
                 , body = bodyToStatement body
                 }
@@ -800,8 +804,8 @@ instance Synthesizable Process Id where
                 Context
                   { from = binder
                   , ret = CIR.TVoid
-                  , name = show binder
-                  , params = inDefs <> outDefs
+                  , inputs = inDefs
+                  , outputs = outDefs
                   , delayStorage = case delayDefs of
                     Just d -> S.fromList d <> subsysStorage
                     Nothing -> error "delay mismatch"
@@ -810,3 +814,55 @@ instance Synthesizable Process Id where
                     Nothing -> []
                   }
           in (context : newC, context : allC1)
+
+compose :: ([Context Process Id], [Context Process Id]) -> CIR.Program
+compose ([], _) = error "Missing main context"
+compose (mainC, allC) = CIR.Prog $ [stdio] <> forwardDecls <> defs <> map main mainC
+  where
+    (forwardDecls, defs) = unzip . map contextToGlobal $ allC
+    stdio = CIR.GMacro "include" ["<stdio.h>"]
+    removePoint = \case
+      CIR.TPointer t -> t
+      t -> t
+    getInput ret (t, v) = CIR.SVarAssign ret (CIR.ECall "scanf" [CIR.EString $ typeToFormat t, CIR.EReference $ CIR.EVar v])
+    putOutput (t, v) = CIR.SExpr $ CIR.ECall "printf" [CIR.EString $ typeToFormat t <> "\\n", CIR.EVar v]
+    typeToFormat ty = case removePoint ty of
+      CIR.TInt -> "%d"
+      CIR.TFloat -> "%f"
+      CIR.TChar -> "%c"
+      t -> error $ "unknown format string for " <> show t
+    getArg (_, v) = CIR.EReference $ CIR.EVar v
+    statusVar = "status"
+    main Context{..} =
+      CIR.GFuncDef
+        Nothing
+        CIR.TInt
+        "main"
+        [(CIR.TInt, "argc"), (CIR.TPointer $ CIR.TPointer $ CIR.TChar, "argv")]
+        $ CIR.SScope
+        $ map (\(t, v, e) -> CIR.SVarDef (removePoint t) v e) (S.elems delayStorage)
+          <> [ CIR.SWhile (CIR.EInt 1) $
+                 CIR.SScope $
+                   map (\(t, v) -> CIR.SVarDecl (removePoint t) v) (inputs <> outputs)
+                     <> [CIR.SVarDecl CIR.TInt statusVar]
+                     <> map (getInput statusVar) inputs
+                     <> [ CIR.SIf
+                            (CIR.EBinOp CIR.Less (CIR.EVar statusVar) (CIR.EInt 1))
+                            (CIR.SScope [CIR.SBreak])
+                            Nothing
+                        ]
+                     <> [ CIR.SExpr $
+                            CIR.ECall (show from) $
+                              map getArg $
+                                inputs <> outputs <> (map (\(t, v, _) -> (t, v)) $ S.elems delayStorage)
+                        ]
+                     <> map putOutput outputs
+             ]
+          <> [CIR.SReturn $ Just $ CIR.EInt $ -1]
+    contextToGlobal Context { .. } =
+      ( CIR.GFuncDeclare (Just CIR.Static) CIR.TVoid (show from) $
+        inputs <> outputs <> (map (\(t, n, _) -> (t, n)) . S.elems) delayStorage
+      , CIR.GFuncDef (Just CIR.Static) CIR.TVoid (show from)
+          (inputs <> outputs <> (map (\(t, n, _) -> (t, n)) . S.elems) delayStorage)
+          body
+      )

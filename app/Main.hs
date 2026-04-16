@@ -17,6 +17,7 @@ data Arguments = Arguments
   , outputCore :: Bool
   , outputIr :: Bool
   , outputFiltered :: Bool
+  , outputComposed :: Bool
   , process :: String
   }
 
@@ -26,8 +27,9 @@ parseArguments =
     <$> strArgument (metavar "input")
     <*> (flag False True (long "output-core") <|> flag' False (long "no-output-core"))
     <*> (flag False True (long "output-ir") <|> flag' False (long "no-output-ir"))
-    <*> (flag True True (long "output-filtered") <|> flag' False (long "no-output-filtered"))
-    <*> option (str >>= \s -> pure s) (long "process" <> value "system")
+    <*> (flag False True (long "output-filtered") <|> flag' False (long "no-output-filtered"))
+    <*> (flag True True (long "output-composed") <|> flag' False (long "no-output-compsosed"))
+    <*> option str (long "process" <> value "system")
 
 argumentParser :: ParserInfo Arguments
 argumentParser =
@@ -46,6 +48,7 @@ main = do
   case filtered of
     Just p@(m, r) -> do
       if arguments.outputFiltered then (print . P.pretty) p else pure ()
-      print . P.pretty $ synthesize r m ([] :: [Context Process Id], [])
+      let context = synthesize r m ([] :: [Context Process Id], [])
+      if arguments.outputComposed then print . P.pretty $ compose context else pure ()
     Nothing -> error $ "No such process: " <> arguments.process
   pure ()

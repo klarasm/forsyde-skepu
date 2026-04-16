@@ -18,8 +18,8 @@ import Prettyprinter
 data (Show a, Show b) => Context a b = Context
   { from :: b
   , ret :: Type
-  , name :: String
-  , params :: [(Type, String)]
+  , inputs :: [(Type, String)]
+  , outputs :: [(Type, String)]
   , delayStorage :: S.Set (Type, String, Expression)
   , body :: Statement
   }
@@ -30,8 +30,8 @@ instance (Show a, Show b, Pretty a, Pretty b) => Pretty (Context a b) where
       <> (nest 4 . tupled)
         [ pretty from
         , pretty ret
-        , pretty name
-        , pretty params
+        , pretty inputs
+        , pretty outputs
         , pretty . S.elems $ delayStorage
         , pretty body
         ]

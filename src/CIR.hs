@@ -337,7 +337,7 @@ instance Pretty Global where
       pretty storageClass
         <+> pretty returnType
         <+> pretty funcId
-        <+> (parens . hsep . punctuate comma . map prettyParam) parameters
+        <> (parens . hsep . punctuate comma . map prettyParam) parameters
         <> line
         <> pretty body
     GFuncDef Nothing returnType funcId parameters body ->
