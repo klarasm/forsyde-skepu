@@ -665,6 +665,12 @@ instance Synthesizable Process Id where
               delayTypes = map argToCDef delaySigs
               delayDefs = delayExprs >>= \_c -> Just $ ((\(a, b) c -> (a, b, c)) <$> delayTypes) <*> _c
               subsysStorage = mconcat . map (\Context { delayStorage } -> delayStorage) $ subsysNew
+              findVert vid = find (\Vertex { id = i } -> i == vid) vertices
+              schedVert = mapMaybe findVert <$> schedule
+              pointers = delaySigs <> inputs <> outputs
+              schedStmts = map (CIR.SExpr . vertexToExpr pointers subsysNew) <$> schedVert
+              locals = filter (\v -> not (elem v pointers)) . map (\(Edge v _ _) -> v) $ edges
+              localDefs = map ((\(t, s) -> CIR.SVarDecl t s) . varToCDef) locals
               context =
                 Context
                   { from = binder
@@ -674,6 +680,8 @@ instance Synthesizable Process Id where
                   , delayStorage = case delayDefs of
                     Just d -> S.fromList d <> subsysStorage
                     Nothing -> error "delay mismatch"
-                  , body = CIR.SScope [] -- Change
+                  , body = CIR.SScope $ case schedStmts of
+                    Just s -> localDefs <> s
+                    Nothing -> []
                   }
           in (context : newC, context : allC1)
