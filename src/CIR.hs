@@ -20,6 +20,7 @@ data StorageClass
   | Static
   | Extern
   | TypeDefinition
+  deriving (Eq, Ord)
 instance Show StorageClass where
   show = \case
     Auto -> "auto"
@@ -34,6 +35,7 @@ data TypeQualifier
   = Const
   | Restrict
   | Volatile
+  deriving (Eq, Ord)
 instance Show TypeQualifier where
   show = \case
     Const -> "const"
@@ -47,6 +49,7 @@ data UnaryOperator
   | LogicalNot
   | PostIncrement
   | PostDecrement
+  deriving (Eq, Ord)
 instance Show UnaryOperator where
   show = \case
     Negate -> "-"
@@ -75,6 +78,7 @@ data BinaryOperator
   | LessEqual
   | Greater
   | GreaterEqual
+  deriving (Eq, Ord)
 instance Show BinaryOperator where
   show = \case
     Add -> "+"
@@ -108,7 +112,8 @@ data Type
   | TReference Type
   | TFunctionPointer Type [Type]
   | TQualifiedType [TypeQualifier] Type
-  deriving (Show)
+  | TConstructor Type Type
+  deriving (Eq, Ord, Show)
 
 data Expression
   = EVar String
@@ -126,7 +131,7 @@ data Expression
   | EPointerAccess Expression String
   | EParen Expression
   | EStatement [Statement] Expression
-  deriving (Show)
+  deriving (Eq, Ord, Show)
 
 data Statement
   = SExpr Expression
@@ -144,7 +149,7 @@ data Statement
   | SReturn (Maybe Expression)
   | SGoto String
   | SLabel String
-  deriving (Show)
+  deriving (Eq, Ord, Show)
 
 data Global
   = GFuncDeclare (Maybe StorageClass) Type String [(Type, String)]
@@ -153,10 +158,10 @@ data Global
   | GVarDef Type String Expression
   | GStruct String [(Type, String)]
   | GMacro String [String]
-  deriving (Show)
+  deriving (Eq, Ord, Show)
 
 data Program = Prog [Global]
-  deriving (Show)
+  deriving (Eq, Ord, Show)
 
 testProg = Prog
   [ GMacro "include" ["<stdio.h>"]
@@ -221,6 +226,7 @@ instance Pretty Type where
             [] -> pretty "void"
             _ -> hsep . punctuate comma . map pretty $ args
           )
+    TConstructor con inner -> pretty con <> angles (pretty inner)
 
 instance Pretty Expression where
   pretty = \case

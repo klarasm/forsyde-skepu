@@ -12,6 +12,7 @@ module Synthesis (
 ) where
 
 import CIR
+import qualified Data.Set as S
 import Prettyprinter
 
 data (Show a, Show b) => Context a b = Context
@@ -19,7 +20,7 @@ data (Show a, Show b) => Context a b = Context
   , ret :: Type
   , name :: String
   , params :: [(Type, String)]
-  , delayStorage :: [(Type, String, Expression)]
+  , delayStorage :: S.Set (Type, String, Expression)
   , body :: Statement
   }
   deriving (Show)
@@ -31,7 +32,7 @@ instance (Show a, Show b, Pretty a, Pretty b) => Pretty (Context a b) where
         , pretty ret
         , pretty name
         , pretty params
-        , pretty delayStorage
+        , pretty . S.elems $ delayStorage
         , pretty body
         ]
 

@@ -600,7 +600,10 @@ getUsedAndLiftNested reachable p@Process { .. } = S.singleton p { subsystem = su
 portToC :: Port -> CIR.Type
 portToC = \case
   Signal a _ _ -> portToC a
-  Vector _ _ -> undefined
+  Vector (Vector p _) _ ->
+    CIR.TConstructor (CIR.TIdent "skepu::Matrix") (portToC p)
+  Vector p _ ->
+    CIR.TConstructor (CIR.TIdent "skepu::Vector") (portToC p)
   Opaque t -> case t of
     TyVarTy v | getOccString v == "Int" -> CIR.TInt
     TyVarTy v | getOccString v == "Integer" -> CIR.TInt
@@ -618,7 +621,7 @@ varToCDef :: Var -> (CIR.Type, String)
 varToCDef v =
   let port = makePort . varType $ v
       ty = portToC port
-      name = getOccString v
+      name = show $ Direct v
    in (ty, name)
 
 argToCDef :: Var -> (CIR.Type, String)
@@ -648,13 +651,13 @@ instance Synthesizable Process Id where
                 , ret = CIR.TVoid
                 , name = show binder
                 , params = inDefs <> outDefs
-                , delayStorage = []
+                , delayStorage = mempty
                 , body = CIR.SScope [] -- Change
                 }
            in (context : newC, context : allC)
         Just System { .. } ->
           let procs' = filter (/=p) procs
-              (_subsysNew, allC1) = foldr (synthesize procs') (newC, allC) procs'
+              (subsysNew, allC1) = foldr (synthesize procs') (newC, allC) procs'
               inDefs = map argToCDef inputs
               outDefs = map argToCDef outputs
               delays = mapMaybe (delayVertex procs) vertices
@@ -664,6 +667,7 @@ instance Synthesizable Process Id where
               delaySigs = mconcat . map (\v@Vertex { outputs = outputs' } -> if length outputs == 1 then outputs' else error $ "invalid delay outputs: " <> show v) $ delays
               delayTypes = map argToCDef delaySigs
               delayDefs = delayExprs >>= \_c -> Just $ ((\(a, b) c -> (a, b, c)) <$> delayTypes) <*> _c
+              subsysStorage = mconcat . map (\Context { delayStorage } -> delayStorage) $ subsysNew
               context =
                 Context
                   { from = binder
@@ -671,7 +675,7 @@ instance Synthesizable Process Id where
                   , name = show binder
                   , params = inDefs <> outDefs
                   , delayStorage = case delayDefs of
-                    Just d -> d
+                    Just d -> S.fromList d <> subsysStorage
                     Nothing -> error "delay mismatch"
                   , body = CIR.SScope [] -- Change
                   }
