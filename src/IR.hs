@@ -655,7 +655,7 @@ vertexToExpr pointers context Vertex { id = _, .. } = case process of
         then CIR.EVar . show $ Direct io
         else CIR.EReference . CIR.EVar . show $ Direct io
 
-exprToVar :: Int -> [Var] -> CoreExpr -> (Maybe CIR.Statement, CIR.Expression, CIR.Expression)
+exprToVar :: Integer -> [Var] -> CoreExpr -> (Maybe CIR.Statement, CIR.Expression, CIR.Expression)
 exprToVar tmpix args = \case
   Var v -> case elemIndex v args of
     Just ix -> (Nothing, CIR.EVar ("input_" <> show ix), CIR.EDereference $ CIR.EVar ("input_" <> show ix))
@@ -667,34 +667,36 @@ exprToVar tmpix args = \case
   where
     intToVar i = (Just $ CIR.SVarDef CIR.TInt ("tmp_" <> show tmpix) (CIR.EInt $ fromIntegral i), CIR.EVar ("tmp_" <> show tmpix), CIR.EInt $ fromIntegral i)
 
-exprToCExpr :: [Var] -> CoreExpr -> ([CIR.Statement], CIR.Expression)
-exprToCExpr args expr = case expr of
+varToArg :: Eq a => [a] -> a -> Maybe String
+varToArg args v =
+  elemIndex v args >>= \ix -> pure $ "input_" <> show ix
+
+exprToCExpr :: Integer -> [Var] -> CoreExpr -> (Integer, [CIR.Statement], CIR.Expression)
+exprToCExpr counter args expr = case expr of
   App (App (App (Var f) _) _) (Var v) ->
-    case elemIndex v args of
-      Just ix ->
-        let arg = "input_" <> show ix
-         in ([], CIR.ECall (getOccString f) [CIR.EVar arg])
+    case varToArg args v of
+      Just arg ->
+         (counter, [], CIR.ECall (getOccString f) [CIR.EVar arg])
       Nothing -> error "Var not in args!"
   App (App (Var f) _) (Var v) | not $ typeOrConstraint v ->
-    case elemIndex v args of
-      Just ix ->
-        let arg = "input_" <> show ix
-         in ([], CIR.ECall (getOccString f) [CIR.EVar arg])
+    case varToArg args v of
+      Just arg ->
+         (counter, [], CIR.ECall (getOccString f) [CIR.EVar arg])
       Nothing -> error $ "Var not in args! " <> showPprUnsafe expr
   App (App (Var f) _) _ ->
     let v1 = CIR.EVar "input_0"
         v2 = CIR.EVar "input_1"
         dv1 = CIR.EDereference v1
         dv2 = CIR.EDereference v2
-     in ([], fun2Param (v1, dv1) (v2, dv2) $ getOccString f)
+     in (counter, [], fun2Param (v1, dv1) (v2, dv2) $ getOccString f)
   App (App (App (App (Var f) _) _) e1) e2 ->
-    let (init1, v1, dv1) = exprToVar 0 args e1
-        (init2, v2, dv2) = exprToVar 1 args e2
-     in (maybeToList init1 <> maybeToList init2, fun2Param (v1, dv1) (v2, dv2) $ getOccString f)
+    let (init1, v1, dv1) = exprToVar counter args e1
+        (init2, v2, dv2) = exprToVar (counter+1) args e2
+     in (counter+2, maybeToList init1 <> maybeToList init2, fun2Param (v1, dv1) (v2, dv2) $ getOccString f)
   Var v -> case elemIndex v args of
     Just ix ->
         let arg = "input_" <> show ix
-         in ([], CIR.EDereference $ CIR.EVar arg)
+         in (counter, [], CIR.EDereference $ CIR.EVar arg)
     Nothing -> error $ "Var not in args! " <> showPprUnsafe expr
   e -> error . showPprUnsafe $ e
   where
@@ -717,8 +719,8 @@ bodyToStatement = \case
   App (App (App (App (App (Var v) _) _) _) _) e
     | getOccString v == "comb22" -> case e of
       Lam b1 (Lam b2 (App (App (App (App (Var v') _) _) e1) e2)) | getOccString v' == "(,)" ->
-        let (init1, ea1) = exprToCExpr [b1, b2] e1
-            (init2, ea2) = exprToCExpr [b1, b2] e2
+        let (cntr, init1, ea1) = exprToCExpr 0 [b1, b2] e1
+            (_, init2, ea2) = exprToCExpr cntr [b1, b2] e2
          in
           CIR.SScope $
             init1 <> init2 <>
@@ -731,14 +733,14 @@ bodyToStatement = \case
   App (App (App (App (Var v) _) _) _) e
     | getOccString v == "comb21" -> case e of
       Lam b1 (Lam b2 e1) ->
-        let (init1, ea1) = exprToCExpr [b1, b2] e1
+        let (_, init1, ea1) = exprToCExpr 0 [b1, b2] e1
          in
           CIR.SScope $
             init1 <>
             [ CIR.SAssign (CIR.EDereference $ CIR.EVar "output_0") ea1
             ]
       e1 ->
-        let (init1, ea1) = exprToCExpr [] e1
+        let (_, init1, ea1) = exprToCExpr 0 [] e1
          in
           CIR.SScope $
             init1 <>
@@ -746,8 +748,8 @@ bodyToStatement = \case
             ]
     | getOccString v == "comb12" -> case e of
       Lam b1 (App (App (App (App (Var v') _) _) e1) e2) | getOccString v' == "(,)" ->
-        let (init1, ea1) = exprToCExpr [b1] e1
-            (init2, ea2) = exprToCExpr [b1] e2
+        let (cntr, init1, ea1) = exprToCExpr 0 [b1] e1
+            (_, init2, ea2) = exprToCExpr cntr [b1] e2
          in
           CIR.SScope $
             init1 <>
