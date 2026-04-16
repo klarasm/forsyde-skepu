@@ -19,8 +19,8 @@ module IR (
 where
 
 import Control.Monad
-import Data.List (sort)
-import Data.Maybe (mapMaybe)
+import Data.List (elemIndex, find, sort)
+import Data.Maybe (mapMaybe, maybeToList)
 import qualified Data.Set as S
 import GHC.Core
 import GHC.Core.TyCo.Rep
@@ -634,6 +634,131 @@ delayExprToC = \case
   App (Var _) (Lit (LitNumber _ i)) -> CIR.EInt . fromIntegral $ i
   _ -> undefined
 
+vertexToExpr :: Foldable t => t Var -> [Context a Id] -> Vertex -> CIR.Expression
+vertexToExpr pointers context Vertex { id = _, .. } = case process of
+  Right _ -> undefined
+  Left v -> CIR.ECall (show v) $ map ioToExpr inputs <> map ioToExpr outputs <> (delayParams v)
+  where
+    delayParams v =
+      S.elems
+        . S.map (\(_, s, _) -> CIR.EVar s)
+        . mconcat
+        . map (\Context{delayStorage} -> delayStorage)
+        . filter (\Context{from} -> v == from)
+        $ context
+    ioToExpr io =
+      if elem io pointers
+        then CIR.EVar . show $ Direct io
+        else CIR.EReference . CIR.EVar . show $ Direct io
+
+exprToVar :: Int -> [Var] -> CoreExpr -> (Maybe CIR.Statement, CIR.Expression, CIR.Expression)
+exprToVar tmpix args = \case
+  Var v -> case elemIndex v args of
+    Just ix -> (Nothing, CIR.EVar ("input_" <> show ix), CIR.EDereference $ CIR.EVar ("input_" <> show ix))
+    Nothing -> undefined
+  Lit (LitNumber _ i) -> intToVar i
+  App _ (Lit (LitNumber _ i)) -> intToVar i
+  App e1 e2 -> error $ "App " <> showPprUnsafe e1 <> " " <> showPprUnsafe e2
+  e -> error . showPprUnsafe $ e
+  where
+    intToVar i = (Just $ CIR.SVarDef CIR.TInt ("tmp_" <> show tmpix) (CIR.EInt $ fromIntegral i), CIR.EVar ("tmp_" <> show tmpix), CIR.EInt $ fromIntegral i)
+
+exprToCExpr :: [Var] -> CoreExpr -> ([CIR.Statement], CIR.Expression)
+exprToCExpr args expr = case expr of
+  App (App (App (Var f) _) _) (Var v) ->
+    case elemIndex v args of
+      Just ix ->
+        let arg = "input_" <> show ix
+         in ([], CIR.ECall (getOccString f) [CIR.EVar arg])
+      Nothing -> error "Var not in args!"
+  App (App (Var f) _) (Var v) | not $ typeOrConstraint v ->
+    case elemIndex v args of
+      Just ix ->
+        let arg = "input_" <> show ix
+         in ([], CIR.ECall (getOccString f) [CIR.EVar arg])
+      Nothing -> error $ "Var not in args! " <> showPprUnsafe expr
+  App (App (Var f) _) _ ->
+    let v1 = CIR.EVar "input_0"
+        v2 = CIR.EVar "input_1"
+        dv1 = CIR.EDereference v1
+        dv2 = CIR.EDereference v2
+     in ([], fun2Param (dv1, v1) (dv2, v2) $ getOccString f)
+  App (App (App (App (Var f) _) _) e1) e2 ->
+    let (init1, v1, dv1) = exprToVar 0 args e1
+        (init2, v2, dv2) = exprToVar 1 args e2
+     in (maybeToList init1 <> maybeToList init2, fun2Param (v1, dv1) (v2, dv2) $ getOccString f)
+  e -> error . showPprUnsafe $ e
+  where
+    fun2Param (v1, dv1) (v2, dv2) = \case
+      "+" -> CIR.EBinOp CIR.Add dv1 dv2
+      "*" -> CIR.EBinOp CIR.Multiply dv1 dv2
+      "-" -> CIR.EBinOp CIR.Subtract dv1 dv2
+      f -> CIR.ECall f [v1, v2]
+
+bodyToStatement :: CoreExpr -> CIR.Statement
+bodyToStatement = \case
+  App (App (App (App (App (App (App (App (App (Var v) _) _) _) _) _) _) _) _) e ->
+    error $ "9App(" <> show (Direct v) <> "): " <> showPprUnsafe e
+  App (App (App (App (App (App (App (App (Var v) _) _) _) _) _) _) _) e ->
+    error $ "8App(" <> show (Direct v) <> "): " <> showPprUnsafe e
+  App (App (App (App (App (App (App (Var v) _) _) _) _) _) _) e ->
+    error $ "7App(" <> show (Direct v) <> "): " <> showPprUnsafe e
+  App (App (App (App (App (App (Var v) _) _) _) _) _) e ->
+    error $ "6App(" <> show (Direct v) <> "): " <> showPprUnsafe e
+  App (App (App (App (App (Var v) _) _) _) _) e
+    | getOccString v == "comb22" -> case e of
+      Lam b1 (Lam b2 (App (App (App (App (Var v') _) _) e1) e2)) | getOccString v' == "(,)" ->
+        let (init1, ea1) = exprToCExpr [b1, b2] e1
+            (init2, ea2) = exprToCExpr [b1, b2] e2
+         in
+          CIR.SScope $
+            init1 <> init2 <>
+            [ CIR.SAssign (CIR.EDereference $ CIR.EVar "output_0") ea1
+            , CIR.SAssign (CIR.EDereference $ CIR.EVar "output_1") ea2
+            ]
+      e' -> error . showPprUnsafe $ e'
+    | otherwise ->
+      error $ "5App(" <> show (Direct v) <> "): " <> showPprUnsafe e
+  App (App (App (App (Var v) _) _) _) e
+    | getOccString v == "comb21" -> case e of
+      Lam b1 (Lam b2 e1) ->
+        let (init1, ea1) = exprToCExpr [b1, b2] e1
+         in
+          CIR.SScope $
+            init1 <>
+            [ CIR.SAssign (CIR.EDereference $ CIR.EVar "output_0") ea1
+            ]
+      e1 ->
+        let (init1, ea1) = exprToCExpr [] e1
+         in
+          CIR.SScope $
+            init1 <>
+            [ CIR.SAssign (CIR.EDereference $ CIR.EVar "output_0") $ ea1
+            ]
+    | getOccString v == "comb12" -> case e of
+      Lam b1 (App (App (App (App (Var v') _) _) _) e1) | getOccString v' == "(,)" ->
+        let (init1, ea1) = exprToCExpr [b1] e1
+         in
+          CIR.SScope $
+            init1 <>
+            [ CIR.SAssign (CIR.EDereference $ CIR.EVar "output_0") $ ea1
+            ]
+      e' -> error . showPprUnsafe $ e'
+    | otherwise ->
+      error $ "4App(" <> show (Direct v) <> "): " <> showPprUnsafe e
+  App (App (App (Var v) _) _) e ->
+    error $ "3App(" <> show (Direct v) <> "): " <> showPprUnsafe e
+  App (App (Var v) _) e
+    | getOccString v == "delay" -> CIR.SScope
+      [ CIR.SAssign (CIR.EDereference $ CIR.EVar "output_0") (CIR.EDereference $ CIR.EVar "input_0")
+      ]
+    | otherwise ->
+      error $ "2App(" <> show (Direct v) <> "): " <> showPprUnsafe e
+  App (Var v) e ->
+    error $ "1App(" <> show (Direct v) <> "): " <> showPprUnsafe e
+  e -> error . showPprUnsafe $ e
+  -- _ -> CIR.SScope []
+
 instance Synthesizable Process Id where
   synthesize procs p@Process { .. } (newC, allC) =
     case filter (\Context { from } -> binder == from) allC of
@@ -649,7 +774,7 @@ instance Synthesizable Process Id where
                 , name = show binder
                 , params = inDefs <> outDefs
                 , delayStorage = mempty
-                , body = CIR.SScope [] -- Change
+                , body = bodyToStatement body
                 }
            in (context : newC, context : allC)
         Just System { .. } ->
