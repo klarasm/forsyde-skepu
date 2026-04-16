@@ -357,10 +357,7 @@ translateExpr parent procs expr' = out
   noioedges = mconcat . map (makeEdge noiovertices) $ binds
   vertices =
     mapMaybe id . zipWith (makeVertex parent (procs <> processes)) [0 ..] $
-      apps
-        <> map (\v -> (Var v, [], [v])) inputs
-        <> map (\(v, m) -> (Var v, [v], m)) inputMap
-        <> map (\v -> (Var v, [v], [])) outputs
+      apps <> map (\(v, m) -> (Var v, [v], m)) inputMap
   edges = mconcat . map (makeEdge vertices) $ binds
   sEdges = mapMaybe (\Edge {source, target} ->
     if isDelayVertex (procs <> processes) vertices source
