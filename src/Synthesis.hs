@@ -244,7 +244,8 @@ instance Synthesizable Process Id where
            in (context : newC, context : allC)
         Just System { .. } ->
           let procs' = filter (/=p) procs
-              (subsysNew, allC1) = foldr (synthesize procs') (newC, allC) procs'
+              systemProcs = S.elems . mconcat . map (vertexProcs (S.fromList procs)) $ vertices
+              (subsysNew, allC1) = foldr (synthesize procs') (newC, allC) systemProcs
               inDefs = map argToCDef inputs
               outDefs = map argToCDef outputs
               delays = mapMaybe (delayVertex procs) vertices

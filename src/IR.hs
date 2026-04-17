@@ -20,6 +20,8 @@ module IR (
   typeOrConstraint,
   delayVertex,
   delayProc,
+  procsFromId,
+  vertexProcs
 )
 where
 
@@ -569,16 +571,8 @@ filterUnusedSystem (reachable, used) s@System { .. } =
     processSet = S.fromList processes
     subsysUsed = (mconcat . S.elems . S.map (getUsedAndLiftNested reachable)) used'
     used' = usedByVertices used vertices
-    usedByVertices acc = (acc <>) . mconcat . map vertexProcs
+    usedByVertices acc = (acc <>) . mconcat . map (vertexProcs $ reachable <> processSet)
     vertices' = map removeInline vertices
-    vertexProcs Vertex { process } = case process of
-      Left p ->
-        let procs = findProc p (reachable <> processSet)
-            internalApps = (mconcat . S.elems . S.map (findInternal $ reachable <> processSet)) procs
-         in procs <> internalApps
-      Right p ->
-        let internalApps = (findInternal $ reachable <> processSet) p
-         in S.singleton p <> internalApps
     removeInline v@Vertex { process } = case process of
       Right Process { binder } -> v { process = Left binder }
       _ -> v
@@ -591,6 +585,16 @@ findProc var = S.filter (\Process { binder } -> binder == var)
 findInternal :: S.Set Process -> Process -> S.Set Process
 findInternal reachable Process {appliedInternal} =
   mconcat $ findProc <$> appliedInternal <*> [reachable]
+
+vertexProcs :: S.Set Process -> Vertex -> S.Set Process
+vertexProcs reachable Vertex { process } = case process of
+  Left p ->
+    let procs = findProc p reachable
+        internalApps = (mconcat . S.elems . S.map (findInternal $ reachable)) procs
+     in procs <> internalApps
+  Right p ->
+    let internalApps = (findInternal $ reachable) p
+     in S.singleton p <> internalApps
 
 getUsedAndLiftNested :: S.Set Process -> Process -> S.Set Process
 getUsedAndLiftNested reachable p@Process { .. } = S.singleton p { subsystem = subsys } <> subsysUsed'
