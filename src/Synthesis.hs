@@ -212,8 +212,24 @@ bodyToStatement = \case
       e' -> error . showPprUnsafe $ e'
     | otherwise ->
       error $ "4App(" <> show (Direct v) <> "): " <> showPprUnsafe e
-  App (App (App (Var v) _) _) e ->
-    error $ "3App(" <> show (Direct v) <> "): " <> showPprUnsafe e
+  App (App (App (Var v) _) _) e
+    | getOccString v == "comb11" -> case e of
+      Lam b1 e1 ->
+        let (_, init1, ea1) = exprToCExpr 0 [b1] e1
+         in
+          CIR.SScope $
+            init1 <>
+            [ CIR.SAssign (CIR.EDereference $ CIR.EVar "output_0") ea1
+            ]
+      e1 ->
+        let (_, init1, ea1) = exprToCExpr 0 [] e1
+         in
+          CIR.SScope $
+            init1 <>
+            [ CIR.SAssign (CIR.EDereference $ CIR.EVar "output_0") $ ea1
+            ]
+    | otherwise ->
+      error $ "3App(" <> show (Direct v) <> "): " <> showPprUnsafe e
   App (App (Var v) _) e
     | getOccString v == "delay" -> CIR.SScope
       [ CIR.SAssign (CIR.EDereference $ CIR.EVar "output_0") (CIR.EDereference $ CIR.EVar "input_0")
