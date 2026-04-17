@@ -59,7 +59,10 @@ portToC = \case
     CIR.TConstructor (CIR.TIdent "skepu::Matrix") (portToC p)
   Vector p _ ->
     CIR.TConstructor (CIR.TIdent "skepu::Vector") (portToC p)
-  Opaque t -> case t of
+  Opaque t -> typeToCType t
+
+typeToCType :: Type -> CIR.Type
+typeToCType = \case
     TyVarTy v | getOccString v == "Int" -> CIR.TInt
     TyVarTy v | getOccString v == "Integer" -> CIR.TInt
     TyVarTy v | getOccString v == "Float" -> CIR.TFloat
@@ -70,7 +73,7 @@ portToC = \case
     TyConApp v [] | (getOccString . tyConName) v == "Double" -> CIR.TFloat
     TyVarTy v -> error $ "TyVarTy: " <> showPprUnsafe v
     TyConApp v a -> error $ "TyConApp: " <> showPprUnsafe v <> " " <> showPprUnsafe a
-    _t -> error $ "Something else: " <> showPprUnsafe _t
+    t -> error $ "Something else: " <> showPprUnsafe t
 
 varToCDef :: Var -> (CIR.Type, String)
 varToCDef v =
