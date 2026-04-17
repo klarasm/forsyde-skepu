@@ -252,7 +252,15 @@ instance Synthesizable Process Id where
               delayProcs = mconcat . map (delayProc procs) $ delays
               delayBodies = sequence . map (getDelayExpr . \Process { body = b } -> b) $ delayProcs
               delayExprs = map delayExprToC <$> delayBodies
-              delaySigs = mconcat . map (\v@Vertex { outputs = outputs' } -> if length outputs == 1 then outputs' else error $ "invalid delay outputs: " <> show v) $ delays
+              delaySigs =
+                mconcat
+                  . map
+                    ( \v@Vertex {outputs = outputs'} ->
+                        if length outputs == 1
+                          then outputs'
+                          else error $ "invalid delay outputs: " <> show v
+                    )
+                  $ delays
               delayTypes = map argToCDef delaySigs
               delayDefs = delayExprs >>= \_c -> Just $ ((\(a, b) c -> (a, b, c)) <$> delayTypes) <*> _c
               subsysStorage = mconcat . map (\Context { delayStorage } -> delayStorage) $ subsysNew
