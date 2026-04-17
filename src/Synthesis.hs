@@ -63,16 +63,33 @@ portToC = \case
 
 typeToCType :: Type -> CIR.Type
 typeToCType = \case
-    TyVarTy v | getOccString v == "Int" -> CIR.TInt
-    TyVarTy v | getOccString v == "Integer" -> CIR.TInt
-    TyVarTy v | getOccString v == "Float" -> CIR.TFloat
-    TyVarTy v | getOccString v == "Double" -> CIR.TFloat
-    TyConApp v [] | (getOccString . tyConName) v == "Int" -> CIR.TInt
-    TyConApp v [] | (getOccString . tyConName) v == "Integer" -> CIR.TInt
-    TyConApp v [] | (getOccString . tyConName) v == "Float" -> CIR.TFloat
-    TyConApp v [] | (getOccString . tyConName) v == "Double" -> CIR.TFloat
+    TyVarTy v
+      | getOccString v == "Int" -> CIR.TInt
+      | getOccString v == "Integer" -> CIR.TInt
+      | getOccString v == "Float" -> CIR.TFloat
+      | getOccString v == "Double" -> CIR.TFloat
     TyVarTy v -> error $ "TyVarTy: " <> showPprUnsafe v
-    TyConApp v a -> error $ "TyConApp: " <> showPprUnsafe v <> " " <> showPprUnsafe a
+    TyConApp v []
+      | getOccString v == "Int" -> CIR.TInt
+      | getOccString v == "Integer" -> CIR.TInt
+      | getOccString v == "Float" -> CIR.TFloat
+      | getOccString v == "Double" -> CIR.TFloat
+    TyConApp v1 [v2] | getOccString v1 == "Num" -> case v2 of
+      TyVarTy v2'
+        | getOccString v2' == "Integer" -> CIR.TInt
+        | getOccString v2' == "Int" -> CIR.TInt
+        | getOccString v2' == "Float" -> CIR.TFloat
+        | getOccString v2' == "Double" -> CIR.TFloat
+      TyConApp v2' _
+        | getOccString v2' == "Integer" -> CIR.TInt
+        | getOccString v2' == "Int" -> CIR.TInt
+        | getOccString v2' == "Float" -> CIR.TFloat
+        | getOccString v2' == "Double" -> CIR.TFloat
+      TyConApp v2' _ -> error . showPprUnsafe $ v2'
+      _ -> error . showPprUnsafe $ v2
+    TyConApp v1 _ | getOccString v1 == "Floating" -> CIR.TFloat
+    TyConApp v1 _ | getOccString v1 == "Integral" -> CIR.TInt
+    TyConApp v a -> error $ "TyConApp: " <> (getOccString . tyConName) v <> " " <> showPprUnsafe a
     t -> error $ "Something else: " <> showPprUnsafe t
 
 varToCDef :: Var -> (CIR.Type, String)
