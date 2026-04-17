@@ -136,7 +136,8 @@ resolveBinOp tmpix stmts expr1 expr2 = \case
   "+" -> (tmpix, stmts <> stmts, CIR.EBinOp CIR.Add expr1 expr2)
   "*" -> (tmpix, stmts <> stmts, CIR.EBinOp CIR.Multiply expr1 expr2)
   "-" -> (tmpix, stmts <> stmts, CIR.EBinOp CIR.Subtract expr1 expr2)
-  "div" -> (tmpix, stmts <> stmts, CIR.EBinOp CIR.Divide expr1 expr2)
+  "quot" -> (tmpix, stmts <> stmts, CIR.EBinOp CIR.Divide expr1 expr2)
+  "div" -> error "Haskell `div` rounds to negative infinity, not implemented. Consider using `quot`"
   u -> error $ "Unknown function: " <> u
 
 varToArg :: Eq a => [a] -> a -> Maybe CIR.Expression
