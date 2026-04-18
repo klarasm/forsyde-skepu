@@ -92,6 +92,11 @@ typeToCType = \case
     TyConApp v a -> error $ "TyConApp: " <> (getOccString . tyConName) v <> " " <> showPprUnsafe a
     t -> error $ "Something else: " <> showPprUnsafe t
 
+exprToCType = \case
+  Type t -> typeToCType t
+  Var v -> typeToCType . varType $ v
+  _ -> error "Not a type!"
+
 varToCDef :: Var -> (CIR.Type, String)
 varToCDef v =
   let port = makePort . varType $ v
@@ -137,26 +142,53 @@ exprToCExpr' tmpix args expr = case expr of
     Just v' -> (tmpix, [], CIR.EDereference v')
     Nothing -> undefined
   -- Unary operator/function (with type variables)
-  App (App (Var f) _) (Var v) | not $ typeOrConstraint $ Var v ->
+  App (App (Var f) t) (Var v) | typeOrConstraint t && (not $ typeOrConstraint $ Var v) ->
     case varToArg args v of
       Just arg ->
          (tmpix, [], CIR.ECall (getOccString f) [arg])
       Nothing -> error $ "Var not in args! " <> showPprUnsafe expr
+  -- A binary function passed as a value (with type constraints). Construct a lambda
+  App (App (Var f) t1) t2 | typeOrConstraint t1 && typeOrConstraint t2 ->
+    let in1 = "input_0"
+        t1' = exprToCType t1
+        in2 = "input_1"
+        t2' = exprToCType t2
+        (tmpix', stmts, expr') = resolveBinOp tmpix [] (CIR.EVar in1) (CIR.EVar in2) (getOccString f)
+        expr'' = CIR.ELambda [] [(t1', in1), (t2', in2)] $ CIR.SScope [CIR.SReturn . Just $ expr']
+     in (tmpix', stmts, expr'')
+  -- Inner function (skeleton) applied to a function and var
+  -- App (App (App (Var inner) t) f) (Var v) ->
+  App (App (App (Var inner) t) f) (Var v) ->
+    case varToArg args v of
+      Just v' ->
+        let (tmpix', stmts, exprToCall) = exprToCExpr' (tmpix+1) args f
+            (tmpix'', toCall) = (tmpix'+1, "tmp_" <> show tmpix')
+            stmt = CIR.SVarDef CIR.TAuto toCall $
+              CIR.ECall (skelToSkePU $ getOccString inner) [CIR.EVar toCall]
+         in
+           (tmpix'', stmts <> [stmt], error $ show $ pretty stmt)
+      Nothing -> undefined
   -- Binary operator/function (with type variables)
   App (App (App (App (Var f) t1) t2) e1) e2 | typeOrConstraint t1 && typeOrConstraint t2 ->
     let (tmpix1, stmts1, expr1) = exprToCExpr' tmpix args e1
         (tmpix2, stmts2, expr2) = exprToCExpr' tmpix1 args e2
+     -- in resolveBinOp tmpix2 (stmts1 <> stmts2) expr1 expr2 $ s
      in resolveBinOp tmpix2 (stmts1 <> stmts2) expr1 expr2 $ getOccString f
   e -> error . showPprUnsafe $ e
+
+skelToSkePU :: String -> String
+skelToSkePU = \case
+  "reduce" -> "skepu::Reduce"
+  _ -> undefined
 
 resolveBinOp ::
   Integer -> [CIR.Statement] -> CIR.Expression -> CIR.Expression -> String
   -> (Integer, [CIR.Statement], CIR.Expression)
 resolveBinOp tmpix stmts expr1 expr2 = \case
-  "+" -> (tmpix, stmts <> stmts, CIR.EBinOp CIR.Add expr1 expr2)
-  "*" -> (tmpix, stmts <> stmts, CIR.EBinOp CIR.Multiply expr1 expr2)
-  "-" -> (tmpix, stmts <> stmts, CIR.EBinOp CIR.Subtract expr1 expr2)
-  "quot" -> (tmpix, stmts <> stmts, CIR.EBinOp CIR.Divide expr1 expr2)
+  "+" -> (tmpix, stmts, CIR.EBinOp CIR.Add expr1 expr2)
+  "*" -> (tmpix, stmts, CIR.EBinOp CIR.Multiply expr1 expr2)
+  "-" -> (tmpix, stmts, CIR.EBinOp CIR.Subtract expr1 expr2)
+  "quot" -> (tmpix, stmts, CIR.EBinOp CIR.Divide expr1 expr2)
   "div" -> error "Haskell `div` rounds to negative infinity, not implemented. Consider using `quot`"
   u -> error $ "Unknown function: " <> u
 
