@@ -113,6 +113,7 @@ data Type
   | TFunctionPointer Type [Type]
   | TQualifiedType [TypeQualifier] Type
   | TConstructor Type Type
+  | TAuto
   deriving (Eq, Ord, Show)
 
 data Expression
@@ -131,6 +132,7 @@ data Expression
   | EPointerAccess Expression String
   | EParen Expression
   | EStatement [Statement] Expression
+  | ELambda [String] [(Type, String)] Statement
   deriving (Eq, Ord, Show)
 
 data Statement
@@ -173,7 +175,8 @@ testProg = Prog
   , GFuncDeclare Nothing TInt "foo" [(TInt, "")]
   , GFuncDef Nothing TInt "main" [(TInt, "argc"), (TPointer (TPointer TChar), "argv")] (SScope
     [ SVarDecl TInt "test"
-    , SVarDef (TIdent "auto") "fwef" (ECall "skepu::Map<2>" [])
+    , SVarDef TAuto "fwef" (ECall "skepu::Map<2>" [])
+    , SVarDef TAuto "fwef" (ECall "skepu::Reduce" [ELambda [] [(TInt, "a"), (TInt, "b")] (SScope [SReturn . Just $ EBinOp Add (EVar "a") (EVar "b")])])
     , SArrayDecl TChar "s" [(EInt 2), (EInt 3)]
     , SVarAssign "test" (EInt 1)
     , SVarAssign "test" $ ECall "foo" [EVar "test"]
@@ -194,6 +197,9 @@ testProg = Prog
 -- {
 --     int test;
 --     auto fwef = skepu::Map<2>();
+--     auto fwef = skepu::Reduce([](int a, int b){
+--         return (a + b);
+--     });
 --     char s[2][3];
 --     test = 1;
 --     test = foo(test);
@@ -227,6 +233,10 @@ instance Pretty Type where
             _ -> hsep . punctuate comma . map pretty $ args
           )
     TConstructor con inner -> pretty con <> angles (pretty inner)
+    -- Note: for plain C __auto_type would be better, but SKePU is C++ and c++
+    -- does not recognize __auto_type. In C23 and later auto has the same
+    -- meaning as __auto_type and thus similar to C++ auto.
+    TAuto -> pretty "auto"
 
 instance Pretty Expression where
   pretty = \case
@@ -251,6 +261,10 @@ instance Pretty Expression where
     EParen e -> parens $ pretty e
     EStatement s e -> parens . braces $
       line <> (indent 4 . vsep . map needsSemi $ s) <> pretty e <> semi <> line
+    ELambda capture params body ->
+      pretty capture
+        <> parens (hsep . punctuate comma $ (map prettyParam params))
+        <> pretty body
 
 instance Pretty Statement where
   pretty = \case
@@ -362,9 +376,9 @@ instance Pretty Global where
           <> semi
     GMacro macro opt ->
       pretty "#" <> pretty macro <+> (hsep . map pretty) opt
-    where
-      prettyParam (t@(TPointer _), i) = pretty t <> pretty i
-      prettyParam (t, i) = pretty t <+> pretty i
+
+prettyParam (t@(TPointer _), i) = pretty t <> pretty i
+prettyParam (t, i) = pretty t <+> pretty i
 
 instance Pretty Program where
   pretty (Prog globals) =
