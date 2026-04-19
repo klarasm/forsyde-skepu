@@ -377,6 +377,7 @@ instance Pretty Global where
     GMacro macro opt ->
       pretty "#" <> pretty macro <+> (hsep . map pretty) opt
 
+prettyParam :: Pretty a => (Type, a) -> Doc ann
 prettyParam (t@(TPointer _), i) = pretty t <> pretty i
 prettyParam (t, i) = pretty t <+> pretty i
 
