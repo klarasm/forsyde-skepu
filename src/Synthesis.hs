@@ -209,6 +209,11 @@ exprToCExpr counter args expr = case expr of
         dv1 = CIR.EDereference v1
         dv2 = CIR.EDereference v2
      in resolveBinOp counter [] dv1 dv2 $ getOccString f
+  -- A partially applied binary operator passed as a value. Apply it to the input argument
+  App (App (App (Var f) t1) t2) e | typeOrConstraint t1 && typeOrConstraint t2 ->
+    let (tmpix1, stmts1, e1) = exprToCExpr' tmpix1 args e
+        v1 = CIR.EDereference $ CIR.EVar "input_0"
+     in resolveBinOp tmpix1 stmts1 e1 v1 $ getOccString f
   e -> exprToCExpr' counter args e
 
 bodyToStatement :: CoreExpr -> CIR.Statement
