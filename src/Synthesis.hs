@@ -117,6 +117,11 @@ delayExprToC = \case
   App (Var _) (Lit (LitNumber _ i)) -> CIR.EInt . fromIntegral $ i
   _ -> undefined
 
+inputArgs :: [CIR.Expression]
+inputArgs = map (CIR.EVar . ("input_" <>) . show) [0 :: Integer ..]
+outputArgs :: [CIR.Expression]
+outputArgs = map (CIR.EVar . ("output_" <>) . show) [0 :: Integer ..]
+
 vertexToExpr :: Foldable t => t Var -> [Context a Id] -> Vertex -> CIR.Expression
 vertexToExpr pointers context Vertex { id = _, .. } = case process of
   Right _ -> undefined
@@ -140,7 +145,15 @@ exprToCExpr' tmpix args expr = case expr of
   App _ (Lit (LitNumber _ i)) -> (tmpix, [], CIR.EInt $ fromIntegral i)
   Var v -> case varToArg args v of
     Just v' -> (tmpix, [], CIR.EDereference v')
-    Nothing -> undefined
+    -- Assume the Var is a function
+    -- TODO: pass arguments from bodyToStatement
+    Nothing ->
+      let (inputs, outputs) = extractTypes [] . varType $ v
+       in ( tmpix
+          , []
+          , CIR.ECall (show $ Direct v) $
+              zipWith const inputArgs inputs <> zipWith const outputArgs outputs
+          )
   -- Unary operator/function (with type variables)
   App (App (Var f) t) (Var v) | typeOrConstraint t && (not $ typeOrConstraint $ Var v) ->
     case varToArg args v of
@@ -156,9 +169,8 @@ exprToCExpr' tmpix args expr = case expr of
         (tmpix', stmts, expr') = resolveBinOp tmpix [] (CIR.EVar in1) (CIR.EVar in2) (getOccString f)
         expr'' = CIR.ELambda [] [(t1', in1), (t2', in2)] $ CIR.SScope [CIR.SReturn . Just $ expr']
      in (tmpix', stmts, expr'')
-  -- Inner function (skeleton) applied to a function and var
-  -- App (App (App (Var inner) t) f) (Var v) ->
-  App (App (App (Var inner) t) f) (Var v) ->
+  -- Inner function applied to a function and var
+  App (App (App (Var inner) t) f) (Var v) | typeOrConstraint t ->
     case varToArg args v of
       Just v' ->
         let (tmpix', stmts, exprToCall) = exprToCExpr' (tmpix+1) args f
@@ -172,7 +184,6 @@ exprToCExpr' tmpix args expr = case expr of
   App (App (App (App (Var f) t1) t2) e1) e2 | typeOrConstraint t1 && typeOrConstraint t2 ->
     let (tmpix1, stmts1, expr1) = exprToCExpr' tmpix args e1
         (tmpix2, stmts2, expr2) = exprToCExpr' tmpix1 args e2
-     -- in resolveBinOp tmpix2 (stmts1 <> stmts2) expr1 expr2 $ s
      in resolveBinOp tmpix2 (stmts1 <> stmts2) expr1 expr2 $ getOccString f
   e -> error . showPprUnsafe $ e
 
