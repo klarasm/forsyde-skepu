@@ -226,10 +226,12 @@ bodyToStatement = \case
   App (App (App (App (App (App (Var v) _) _) _) _) _) e ->
     error $ "6App(" <> show (Direct v) <> "): " <> showPprUnsafe e
   App (App (App (App (App (Var v) _) _) _) _) e
-    | getOccString v == "comb22" -> case e of
-      Lam b1 (Lam b2 (App (App (App (App (Var v') _) _) e1) e2)) | getOccString v' == "(,)" ->
-        let (cntr, init1, ea1) = exprToCExpr 0 [b1, b2] e1
-            (_, init2, ea2) = exprToCExpr cntr [b1, b2] e2
+    | getOccString v == "comb22" ->
+      let (args, expr) = collectBinders e
+       in case expr of
+      App (App (App (App (Var v') _) _) e1) e2 | getOccString v' == "(,)" ->
+        let (cntr, init1, ea1) = exprToCExpr 0 args e1
+            (_, init2, ea2) = exprToCExpr cntr args e2
          in
           CIR.SScope $
             init1 <> init2 <>
@@ -240,27 +242,20 @@ bodyToStatement = \case
     | otherwise ->
       error $ "5App(" <> show (Direct v) <> "): " <> showPprUnsafe e
   App (App (App (App (Var v) _) _) _) e
-    | getOccString v == "comb21" -> case e of
-      Lam b1 (Lam b2 e1) ->
-        let (_, init1, ea1) = exprToCExpr 0 [b1, b2] e1
-         in
-          CIR.SScope $
-            init1 <>
-            [ CIR.SAssign (CIR.EDereference $ CIR.EVar "output_0") ea1
-            ]
-      e1 ->
-        let (_, init1, ea1) = exprToCExpr 0 [] e1
-         in
-          CIR.SScope $
-            init1 <>
-            [ CIR.SAssign (CIR.EDereference $ CIR.EVar "output_0") $ ea1
-            ]
-    | getOccString v == "comb12" -> case e of
-      Lam b1 (App (App (App (App (Var v') _) _) e1) e2) | getOccString v' == "(,)" ->
-        let (cntr, init1, ea1) = exprToCExpr 0 [b1] e1
-            (_, init2, ea2) = exprToCExpr cntr [b1] e2
-         in
-          CIR.SScope $
+    | getOccString v == "comb21" ->
+      let (args, expr) = collectBinders e
+          (_, init1, ea1) = exprToCExpr 0 args expr
+       in CIR.SScope $
+          init1 <>
+          [ CIR.SAssign (CIR.EDereference $ CIR.EVar "output_0") ea1
+          ]
+    | getOccString v == "comb12" ->
+      let (args, expr) = collectBinders e
+      in case expr of
+      App (App (App (App (Var v') _) _) e1) e2 | getOccString v' == "(,)" ->
+        let (cntr, init1, ea1) = exprToCExpr 0 args e1
+            (_, init2, ea2) = exprToCExpr cntr args e2
+         in CIR.SScope $
             init1 <>
             init2 <>
             [ CIR.SAssign (CIR.EDereference $ CIR.EVar "output_0") $ ea1
@@ -270,16 +265,9 @@ bodyToStatement = \case
     | otherwise ->
       error $ "4App(" <> show (Direct v) <> "): " <> showPprUnsafe e
   App (App (App (Var v) _) _) e
-    | getOccString v == "comb11" -> case e of
-      Lam b1 e1 ->
-        let (_, init1, ea1) = exprToCExpr 0 [b1] e1
-         in
-          CIR.SScope $
-            init1 <>
-            [ CIR.SAssign (CIR.EDereference $ CIR.EVar "output_0") ea1
-            ]
-      e1 ->
-        let (_, init1, ea1) = exprToCExpr 0 [] e1
+    | getOccString v == "comb11" ->
+      let (args, expr) = collectBinders e
+          (_, init1, ea1) = exprToCExpr 0 args expr
          in
           CIR.SScope $
             init1 <>
@@ -295,6 +283,14 @@ bodyToStatement = \case
       error $ "2App(" <> show (Direct v) <> "): " <> showPprUnsafe e
   App (Var v) e ->
     error $ "1App(" <> show (Direct v) <> "): " <> showPprUnsafe e
+  -- Might be a regular function, i.e. not a process
+  e@(Lam _ _) ->
+    let (args, expr') = collectBinders e
+        (_, stmts, expr) = exprToCExpr 0 args expr'
+        output = CIR.EDereference $ CIR.EVar "output_0"
+     in CIR.SScope $
+      stmts
+      <> [CIR.SAssign output $ expr]
   e -> error . showPprUnsafe $ e
 
 instance Synthesizable Process Id where
