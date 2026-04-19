@@ -265,15 +265,32 @@ extractTypes acc = \case
     TyConApp v types | isTupleTyCon v -> reverse resacc <> types
     t -> reverse (t : resacc)
 
--- Strip all Lams so we don't need to bother with non-eta-reduced processes.
--- We con't count the type variables as those won't produce an App in the top
--- level definition.
+-- | Strip Lams and record the binders
+stripLams :: [CoreBndr] -> CoreExpr -> Maybe CoreExpr
+stripLams acc expr = case expr of
+  Lam a e -> stripLams (a : acc) e
+  _ -> stripApps acc expr
+
+-- | Strip Apps matching with the binders from stripLams
+stripApps :: [CoreBndr] -> CoreExpr -> Maybe CoreExpr
+-- If we have an empty binder list the eta-reduce succeeded
+stripApps [] expr = Just expr
+stripApps (x : xs) expr = case expr of
+  -- Matched argument in the correct order, eta-reduce is well-formed so far
+  App e (Var a) | x == a -> stripApps xs e
+  -- We can't match the applied argument in the right order. Cannot eta-reduce
+  -- while keeping semantics.
+  _ -> Nothing
+
+-- | Attempt to strip matching Lam App pairs so we only need to bother with
+-- eta-reduced processes
 stripLamApps :: CoreExpr -> CoreExpr
 stripLamApps expr = case expr of
-  -- Explicitly strips lambdas refering to type-level binders
+  -- Also strip corresponding type variables
   Lam b e | typeOrConstraint (Var b) -> stripLamApps e
-  -- Also strip matching Lam App pairs
-  Lam (arg) (App e (Var v)) | v == arg -> stripLamApps e
+  Lam _ _ -> case stripLams [] expr of
+    Just e -> stripLamApps e
+    Nothing -> expr
   _ -> expr
 
 {- | Make a process from a binding.
