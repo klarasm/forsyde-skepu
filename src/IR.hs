@@ -22,6 +22,7 @@ module IR (
   delayProc,
   procsFromId,
   vertexProcs,
+  stripLams,
   extractTypes,
 )
 where

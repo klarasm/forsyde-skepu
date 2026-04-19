@@ -146,13 +146,17 @@ exprToCExpr' tmpix args expr = case expr of
   Var v -> case varToArg args v of
     Just v' -> (tmpix, [], CIR.EDereference v')
     -- Assume the Var is a function
-    -- TODO: pass arguments from bodyToStatement
     Nothing ->
       let (inputs, outputs) = extractTypes [] . varType $ v
-       in ( tmpix
-          , []
-          , CIR.ECall (show $ Direct v) $
-              zipWith const inputArgs inputs <> zipWith const outputArgs outputs
+          outname = "tmp_" <> show tmpix
+          outvar = CIR.EVar outname
+          outvarref = CIR.EReference outvar
+       in ( tmpix+1
+          , [ CIR.SVarDecl CIR.TInt outname
+            , CIR.SExpr $ CIR.ECall (show $ Direct v) $
+              zipWith const inputArgs inputs <> zipWith const [outvarref] outputs
+            ]
+          , outvar
           )
   -- Unary operator/function (with type variables)
   App (App (Var f) t) (Var v) | typeOrConstraint t && (not $ typeOrConstraint $ Var v) ->
