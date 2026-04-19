@@ -266,18 +266,18 @@ extractTypes acc = \case
     t -> reverse (t : resacc)
 
 -- | Strip Lams and record the binders
-stripLams :: [CoreBndr] -> CoreExpr -> Maybe CoreExpr
+stripLams :: [CoreBndr] -> CoreExpr -> (CoreExpr, [CoreBndr])
 stripLams acc expr = case expr of
   Lam a e -> stripLams (a : acc) e
-  _ -> stripApps acc expr
+  _ -> (expr, acc)
 
 -- | Strip Apps matching with the binders from stripLams
-stripApps :: [CoreBndr] -> CoreExpr -> Maybe CoreExpr
+stripApps :: (CoreExpr, [CoreBndr]) -> Maybe CoreExpr
 -- If we have an empty binder list the eta-reduce succeeded
-stripApps [] expr = Just expr
-stripApps (x : xs) expr = case expr of
+stripApps (expr, []) = Just expr
+stripApps (expr, (x : xs)) = case expr of
   -- Matched argument in the correct order, eta-reduce is well-formed so far
-  App e (Var a) | x == a -> stripApps xs e
+  App e (Var a) | x == a -> stripApps (e, xs)
   -- We can't match the applied argument in the right order. Cannot eta-reduce
   -- while keeping semantics.
   _ -> Nothing
@@ -288,7 +288,7 @@ stripLamApps :: CoreExpr -> CoreExpr
 stripLamApps expr = case expr of
   -- Also strip corresponding type variables
   Lam b e | typeOrConstraint (Var b) -> stripLamApps e
-  Lam _ _ -> case stripLams [] expr of
+  Lam _ _ -> case stripApps . stripLams [] $ expr of
     Just e -> stripLamApps e
     Nothing -> expr
   _ -> expr
