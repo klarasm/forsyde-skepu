@@ -26,8 +26,8 @@ import qualified CIR
 import qualified Data.Set as S
 import Prettyprinter
 
-data (Show a, Show b) => Context a b = Context
-  { from :: b
+data (Show a) => Context a = Context
+  { from :: Id ()
   , ret :: CIR.Type
   , inputs :: [(CIR.Type, String)]
   , outputs :: [(CIR.Type, String)]
@@ -35,7 +35,7 @@ data (Show a, Show b) => Context a b = Context
   , body :: CIR.Statement
   }
   deriving (Show)
-instance (Show a, Show b, Pretty a, Pretty b) => Pretty (Context a b) where
+instance (Show a, Pretty a) => Pretty (Context a) where
   pretty Context { .. } =
     pretty "Context"
       <> (nest 4 . tupled)
@@ -47,10 +47,10 @@ instance (Show a, Show b, Pretty a, Pretty b) => Pretty (Context a b) where
         , pretty body
         ]
 
-class Synthesizable a b where
+class Synthesizable a where
   -- may need to resolve a previously unresolved process as dependency
-  synthesize :: [a] -> a -> ([Context a b], [Context a b]) -> ([Context a b], [Context a b])
-  compose :: ([Context a b], [Context a b]) -> CIR.Program
+  synthesize :: [a] -> a -> ([Context a], [Context a]) -> ([Context a], [Context a])
+  compose :: ([Context a], [Context a]) -> CIR.Program
 
 portToC :: Port -> CIR.Type
 portToC = \case
@@ -103,7 +103,7 @@ varToCDef :: Var -> (CIR.Type, String)
 varToCDef v =
   let port = makePort . varType $ v
       ty = portToC port
-      name = show $ Direct v
+      name = show $ (Direct v :: Id ())
    in (ty, name)
 
 argToCDef :: Var -> (CIR.Type, String)
@@ -124,7 +124,7 @@ inputArgs = map (CIR.EVar . ("input_" <>) . show) [0 :: Integer ..]
 outputArgs :: [CIR.Expression]
 outputArgs = map (CIR.EVar . ("output_" <>) . show) [0 :: Integer ..]
 
-vertexToExpr :: Foldable t => t Var -> [Context a Id] -> Vertex -> CIR.Expression
+vertexToExpr :: Foldable t => t Var -> [Context a] -> Vertex -> CIR.Expression
 vertexToExpr pointers context Vertex { id = _, .. } = case process of
   Right _ -> undefined
   Left v -> CIR.ECall (show v) $ map ioToExpr inputs <> map ioToExpr outputs <> (delayParams v)
@@ -138,8 +138,8 @@ vertexToExpr pointers context Vertex { id = _, .. } = case process of
         $ context
     ioToExpr io =
       if elem io pointers
-        then CIR.EVar . show $ Direct io
-        else CIR.EReference . CIR.EVar . show $ Direct io
+        then CIR.EVar . show $ (Direct io :: Id ())
+        else CIR.EReference . CIR.EVar . show $ (Direct io :: Id ())
 
 mkTemp :: (Num a, Show a) => a -> (a, String)
 mkTemp ix = (ix+1, "tmp_" <> show ix)
@@ -158,7 +158,7 @@ exprToCExpr' tmpix args expr = case expr of
           outvarref = CIR.EReference outvar
        in ( tmpix1
           , [ CIR.SVarDecl CIR.TInt outname
-            , CIR.SExpr $ CIR.ECall (show $ Direct v) $
+            , CIR.SExpr $ CIR.ECall (show $ (Direct v :: Id ())) $
               zipWith const inputArgs inputs <> zipWith const [outvarref] outputs
             ]
           , outvar
@@ -258,13 +258,13 @@ exprToCExpr counter args expr = case expr of
 bodyToStatement :: CoreExpr -> CIR.Statement
 bodyToStatement = \case
   App (App (App (App (App (App (App (App (App (Var v) _) _) _) _) _) _) _) _) e ->
-    error $ "9App(" <> show (Direct v) <> "): " <> showPprUnsafe e
+    error $ "9App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
   App (App (App (App (App (App (App (App (Var v) _) _) _) _) _) _) _) e ->
-    error $ "8App(" <> show (Direct v) <> "): " <> showPprUnsafe e
+    error $ "8App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
   App (App (App (App (App (App (App (Var v) _) _) _) _) _) _) e ->
-    error $ "7App(" <> show (Direct v) <> "): " <> showPprUnsafe e
+    error $ "7App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
   App (App (App (App (App (App (Var v) _) _) _) _) _) e ->
-    error $ "6App(" <> show (Direct v) <> "): " <> showPprUnsafe e
+    error $ "6App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
   App (App (App (App (App (Var v) _) _) _) _) e
     | getOccString v == "comb22" ->
       let (args, expr) = collectBinders e
@@ -280,7 +280,7 @@ bodyToStatement = \case
             ]
       e' -> error . showPprUnsafe $ e'
     | otherwise ->
-      error $ "5App(" <> show (Direct v) <> "): " <> showPprUnsafe e
+      error $ "5App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
   App (App (App (App (Var v) _) _) _) e
     | getOccString v == "comb21" ->
       let (args, expr) = collectBinders e
@@ -303,7 +303,7 @@ bodyToStatement = \case
             ]
       e' -> error . showPprUnsafe $ e'
     | otherwise ->
-      error $ "4App(" <> show (Direct v) <> "): " <> showPprUnsafe e
+      error $ "4App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
   App (App (App (Var v) _) _) e
     | getOccString v == "comb11" ->
       let (args, expr) = collectBinders e
@@ -314,15 +314,15 @@ bodyToStatement = \case
             [ CIR.SAssign (CIR.EDereference $ CIR.EVar "output_0") $ ea1
             ]
     | otherwise ->
-      error $ "3App(" <> show (Direct v) <> "): " <> showPprUnsafe e
+      error $ "3App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
   App (App (Var v) _) e
     | getOccString v == "delay" -> CIR.SScope
       [ CIR.SAssign (CIR.EDereference $ CIR.EVar "output_0") (CIR.EDereference $ CIR.EVar "input_0")
       ]
     | otherwise ->
-      error $ "2App(" <> show (Direct v) <> "): " <> showPprUnsafe e
+      error $ "2App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
   App (Var v) e ->
-    error $ "1App(" <> show (Direct v) <> "): " <> showPprUnsafe e
+    error $ "1App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
   -- Might be a regular function, i.e. not a process
   e@(Lam _ _) ->
     let (args, expr') = collectBinders e
@@ -333,7 +333,7 @@ bodyToStatement = \case
       <> [CIR.SAssign output $ expr]
   e -> error . showPprUnsafe $ e
 
-instance Synthesizable Process Id where
+instance Synthesizable Process where
   synthesize procs p@Process { .. } (newC, allC) =
     case filter (\Context { from } -> binder == from) allC of
     c : _ -> (c : newC, allC)

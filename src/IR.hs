@@ -45,40 +45,60 @@ import GHC.Unit.Module (moduleName, moduleNameString)
 import qualified Data.Graph as G
 import Prettyprinter
 
-data Id
+data Id a
   = Empty
   | Direct CoreBndr
-  | Nested Id CoreBndr
-  | Inline Id Int
+  | Nested (Id a) (Id a)
+  | Ix Int
+  | ExId a
   deriving (Ord)
-instance Eq Id where
-  (==) Empty Empty = False
+instance Eq a => Eq (Id a) where
+  (==) Empty _ = False
+  (==) _ Empty = False
   (==) (Direct i1) (Direct i2) = i1 == i2
   (==) (Nested i1 b1) (Nested i2 b2) = b1 == b2 && i1 == i2
-  (==) (Inline i1 ix1) (Inline i2 ix2) = ix1 == ix2 && i1 == i2
+  (==) (Ix ix1) (Ix ix2) = ix1 == ix2
+  (==) (ExId n1) (ExId n2) = n1 == n2
   (==) _ _ = False
-instance Show Id where
+instance Show a => Show (Id a) where
   show = \case
     Empty -> ""
     Direct binder -> getString binder
-    Nested parent binder -> show parent <> "_" <> getString binder
-    Inline parent ix -> show parent <> "_" <> show ix
+    Nested parent binder -> show parent <> "_" <> show binder
+    Ix ix -> show ix
+    ExId n -> show n
     where
       getString binder = getOccString binder <> "_" <> (show . getUnique) binder
-instance Pretty Id where
+instance Show a => Pretty (Id a) where
   pretty = unsafeViaShow
 
-instance Semigroup Id where
+instance Semigroup (Id a) where
   (<>) Empty i = i
   (<>) i Empty = i
-  (<>) i (Direct b) = Nested i b
-  (<>) i1 (Inline i2 ix) = Inline (i1 <> i2) ix
-  (<>) i1 (Nested i2 b) = Nested (i1 <> i2) b
+  (<>) i1 (Nested i2 i3) = Nested (i1 <> i2) i3
+  (<>) i1 i2 = Nested i1 i2
 
-instance Monoid Id where
+instance Monoid (Id a) where
   mempty = Empty
 
-showSloppy :: Id -> String
+instance Functor Id where
+  fmap f (Nested a b) = Nested (fmap f a) (fmap f b)
+  fmap f (ExId a) = ExId (f a)
+  fmap _ Empty = Empty
+  fmap _ (Direct a) = Direct a
+  fmap _ (Ix a) = Ix a
+
+instance Applicative Id where
+  pure a = ExId a
+  (ExId f) <*> a = f <$> a
+  (Nested f1 f2) <*> (Nested a1 a2) = Nested (f1 <*> a1) (f2 <*> a2)
+  (Nested f1 f2) <*> a = Nested (f1 <*> a) (f2 <*> a)
+  f <*> Nested a1 a2 = Nested (f <*> a1) (f <*> a2)
+  Empty  <*> _ = Empty
+  Direct i <*>  _ = Direct i
+  Ix i <*> _ = Ix i
+
+showSloppy :: Show a => (Id a) -> String
 showSloppy = \case
   Empty -> ""
   Direct binder -> getOccString binder
@@ -115,10 +135,10 @@ instance Pretty System where
 
 -- A process constructor applied to a function, but not connected in a network.
 data Process = Process
-  { binder :: Id
+  { binder :: Id ()
   , inports :: [Port]
   , outports :: [Port]
-  , appliedInternal :: [Id]
+  , appliedInternal :: [Id ()]
   , subsystem :: Maybe System
   , body :: CoreExpr
   }
@@ -147,7 +167,7 @@ instance Pretty Process where
 -- to be unique inside the system.
 data Vertex = Vertex
   { id :: Int
-  , process :: Either Id Process
+  , process :: Either (Id ()) Process
   , inputs :: [Var]
   , outputs :: [Var]
   }
@@ -305,7 +325,7 @@ stripLamApps expr = case expr of
 A process should be self-contained, i.e. not have any communication outside
 of its arguments and return.
 -}
-makeProcess :: Id -> [Process] -> Either (Int, CoreExpr, [Var], [Var]) CoreBind -> Maybe Process
+makeProcess :: Id a -> [Process] -> Either (Int, CoreExpr, [Var], [Var]) CoreBind -> Maybe Process
 makeProcess parent procs = \case
   Right (Rec _) -> Nothing
   Right (NonRec bind expr') ->
@@ -332,7 +352,7 @@ makeProcess parent procs = \case
   Left (ix, body, inputs, outputs) ->
         Just
           Process
-            { binder = Inline parent ix
+            { binder = const () <$> parent <> Ix ix
             , inports
             , outports
             , subsystem
@@ -373,7 +393,7 @@ typeOrConstraint = \case
 moduleString :: Name -> String
 moduleString = moduleNameString . moduleName . nameModule
 
-translateExpr :: Id -> [Process] -> CoreExpr -> Maybe System
+translateExpr :: Id a -> [Process] -> CoreExpr -> Maybe System
 translateExpr parent procs expr' = out
  where
   (_, inputs', expr) = collectTyAndValBinders expr'
@@ -410,8 +430,8 @@ translateExpr parent procs expr' = out
             }
       else Nothing
 
-procsFromId :: Id -> [Process] -> [Process]
-procsFromId var = filter (\Process { binder } -> binder == var)
+procsFromId :: Id a -> [Process] -> [Process]
+procsFromId var = filter (\Process { binder } -> binder == (const () <$> var))
 
 isDelayVertex :: [Process] -> [Vertex] -> Int -> Bool
 isDelayVertex processes vertices vid =
@@ -442,7 +462,7 @@ isDelayProcess Process { body } =
     (Var func, _args) -> isDelayVar func
     _ -> False
 
-getProcesses :: Id -> [Process] -> CoreExpr -> [Process]
+getProcesses :: Id a -> [Process] -> CoreExpr -> [Process]
 getProcesses parent acc = \case
   Lam _ e -> getProcesses parent acc e
   Let bind expr -> case makeProcess parent acc (Right bind) of
@@ -547,7 +567,7 @@ resolveTuples apps (proc, inputs, output, _) = Just (proc, inputs, outputs)
       lookup out (zip args (zip [0 ..] $ repeat var))
     _ -> Nothing
 
-makeVertex :: Id -> [Process] -> Int -> (CoreExpr, [Var], [Var]) -> Maybe Vertex
+makeVertex :: Id a -> [Process] -> Int -> (CoreExpr, [Var], [Var]) -> Maybe Vertex
 makeVertex parent procs ix = \case
   -- An application of a non-inline process
   (Var bind, inputs, outputs) ->
@@ -605,8 +625,8 @@ filterUnusedSystem (reachable, used) s@System { .. } =
 -- findProc :: (Foldable t, Monoid (f Process), Applicative f) => Id -> t Process -> f Process
 -- findProc vid = foldMap (\p@Process { binder = i } -> if vid == i then pure p else mempty)
 
-findProc :: Id -> S.Set Process -> S.Set Process
-findProc var = S.filter (\Process { binder } -> binder == var)
+findProc :: Id a -> S.Set Process -> S.Set Process
+findProc var = S.filter (\Process { binder } -> binder == (const () <$> var))
 findInternal :: S.Set Process -> Process -> S.Set Process
 findInternal reachable Process {appliedInternal} =
   mconcat $ findProc <$> appliedInternal <*> [reachable]
