@@ -1,4 +1,5 @@
 {-# LANGUAGE LambdaCase #-}
+
 module CIR (
   StorageClass (..),
   TypeQualifier (..),
@@ -12,6 +13,7 @@ module CIR (
 )
 where
 
+import qualified IR
 import Prettyprinter
 
 data StorageClass
@@ -21,28 +23,28 @@ data StorageClass
   | Extern
   | TypeDefinition
   deriving (Eq, Ord)
-instance Show StorageClass where
-  show = \case
-    Auto -> "auto"
-    Register -> "register"
-    Static -> "static"
-    Extern -> "extern"
-    TypeDefinition -> "typedef"
 instance Pretty StorageClass where
-  pretty = unsafeViaShow
+  pretty = \case
+    Auto -> pretty "auto"
+    Register -> pretty "register"
+    Static -> pretty "static"
+    Extern -> pretty "extern"
+    TypeDefinition -> pretty "typedef"
+instance Show StorageClass where
+  show = show . pretty
 
 data TypeQualifier
   = Const
   | Restrict
   | Volatile
   deriving (Eq, Ord)
-instance Show TypeQualifier where
-  show = \case
-    Const -> "const"
-    Restrict -> "restrict"
-    Volatile -> "volatile"
 instance Pretty TypeQualifier where
-  pretty = unsafeViaShow
+  pretty = \case
+    Const -> pretty "const"
+    Restrict -> pretty "restrict"
+    Volatile -> pretty "volatile"
+instance Show TypeQualifier where
+  show = show . pretty
 
 data UnaryOperator
   = Negate
@@ -50,14 +52,14 @@ data UnaryOperator
   | PostIncrement
   | PostDecrement
   deriving (Eq, Ord)
-instance Show UnaryOperator where
-  show = \case
-    Negate -> "-"
-    LogicalNot -> "!"
-    PostIncrement -> "++"
-    PostDecrement -> "--"
 instance Pretty UnaryOperator where
-  pretty = unsafeViaShow
+  pretty = \case
+    Negate -> pretty "-"
+    LogicalNot -> pretty "!"
+    PostIncrement -> pretty "++"
+    PostDecrement -> pretty "--"
+instance Show UnaryOperator where
+  show = show . pretty
 
 data BinaryOperator
   = Add
@@ -79,111 +81,111 @@ data BinaryOperator
   | Greater
   | GreaterEqual
   deriving (Eq, Ord)
-instance Show BinaryOperator where
-  show = \case
-    Add -> "+"
-    Subtract -> "-"
-    Multiply -> "*"
-    Divide -> "/"
-    Modulo -> "%"
-    PlusAssign -> "+="
-    MinusAssign -> "-="
-    MultiplyAssign -> "*="
-    DivideAssign -> "/="
-    ModuloAssign -> "%="
-    Equal -> "=="
-    NotEqual -> "!="
-    LogicalAnd -> "&&"
-    LogicalOr -> "||"
-    Less -> "<"
-    LessEqual -> "<="
-    Greater -> ">"
-    GreaterEqual -> ">="
 instance Pretty BinaryOperator where
-  pretty = unsafeViaShow
+  pretty = \case
+    Add -> pretty "+"
+    Subtract -> pretty "-"
+    Multiply -> pretty "*"
+    Divide -> pretty "/"
+    Modulo -> pretty "%"
+    PlusAssign -> pretty "+="
+    MinusAssign -> pretty "-="
+    MultiplyAssign -> pretty "*="
+    DivideAssign -> pretty "/="
+    ModuloAssign -> pretty "%="
+    Equal -> pretty "=="
+    NotEqual -> pretty "!="
+    LogicalAnd -> pretty "&&"
+    LogicalOr -> pretty "||"
+    Less -> pretty "<"
+    LessEqual -> pretty "<="
+    Greater -> pretty ">"
+    GreaterEqual -> pretty ">="
+instance Show BinaryOperator where
+  show = show . pretty
 
-data Type
+data Type a
   = TVoid
   | TInt
   | TFloat
   | TChar
-  | TIdent String
-  | TPointer Type
-  | TReference Type
-  | TFunctionPointer Type [Type]
-  | TQualifiedType [TypeQualifier] Type
-  | TConstructor Type Type
+  | TIdent (IR.Id a)
+  | TPointer (Type a)
+  | TReference (Type a)
+  | TFunctionPointer (Type a) [(Type a)]
+  | TQualifiedType [TypeQualifier] (Type a)
+  | TConstructor (Type a) (Type a)
   | TAuto
   deriving (Eq, Ord, Show)
 
-data Expression
-  = EVar String
+data Expression a
+  = EVar (IR.Id a)
   | EInt Int
   | EChar Char
   | EString String
-  | EBinOp BinaryOperator Expression Expression
-  | EUnOp UnaryOperator Expression
-  | ECall String [Expression]
-  | ECallExpr Expression [Expression]
-  | EArrayAccess Expression Expression
-  | EReference Expression
-  | EDereference Expression
-  | EMemberAccess Expression String
-  | EPointerAccess Expression String
-  | EParen Expression
-  | EStatement [Statement] Expression
-  | ELambda [String] [(Type, String)] Statement
+  | EBinOp BinaryOperator (Expression a) (Expression a)
+  | EUnOp UnaryOperator (Expression a)
+  | ECall (IR.Id a) [(Expression a)]
+  | ECallExpr (Expression a) [(Expression a)]
+  | EArrayAccess (Expression a) (Expression a)
+  | EReference (Expression a)
+  | EDereference (Expression a)
+  | EMemberAccess (Expression a) (IR.Id a)
+  | EPointerAccess (Expression a) (IR.Id a)
+  | EParen (Expression a)
+  | EStatement [(Statement a)] (Expression a)
+  | ELambda [(IR.Id a)] [((Type a), (IR.Id a))] (Statement a)
   deriving (Eq, Ord, Show)
 
-data Statement
-  = SExpr Expression
-  | SVarDecl Type String
-  | SVarDef Type String Expression
-  | SAssign Expression Expression
-  | SVarAssign String Expression
-  | SArrayDecl Type String [Expression]
-  | SArrayAssign String Expression Expression
-  | SScope [Statement]
-  | SIf Expression Statement (Maybe Statement)
-  | SWhile Expression Statement
-  | SFor Statement Expression Statement Statement
+data Statement a
+  = SExpr (Expression a)
+  | SVarDecl (Type a) (IR.Id a)
+  | SVarDef (Type a) (IR.Id a) (Expression a)
+  | SAssign (Expression a) (Expression a)
+  | SVarAssign (IR.Id a) (Expression a)
+  | SArrayDecl (Type a) (IR.Id a) [(Expression a)]
+  | SArrayAssign (IR.Id a) (Expression a) (Expression a)
+  | SScope [(Statement a)]
+  | SIf (Expression a) (Statement a) (Maybe (Statement a))
+  | SWhile (Expression a) (Statement a)
+  | SFor (Statement a) (Expression a) (Statement a) (Statement a)
   | SBreak
-  | SReturn (Maybe Expression)
-  | SGoto String
-  | SLabel String
+  | SReturn (Maybe (Expression a))
+  | SGoto (IR.Id a)
+  | SLabel (IR.Id a)
   deriving (Eq, Ord, Show)
 
-data Global
-  = GFuncDeclare (Maybe StorageClass) Type String [(Type, String)]
-  | GFuncDef (Maybe StorageClass) Type String [(Type, String)] Statement
-  | GVarDeclare Type String
-  | GVarDef Type String Expression
-  | GStruct String [(Type, String)]
-  | GMacro String [String]
+data Global a
+  = GFuncDeclare (Maybe StorageClass) (Type a) (IR.Id a) [((Type a), (IR.Id a))]
+  | GFuncDef (Maybe StorageClass) (Type a) (IR.Id a) [((Type a), (IR.Id a))] (Statement a)
+  | GVarDeclare (Type a) (IR.Id a)
+  | GVarDef (Type a) (IR.Id a) (Expression a)
+  | GStruct (IR.Id a) [((Type a), (IR.Id a))]
+  | GMacro (IR.Id a) [(IR.Id a)]
   deriving (Eq, Ord, Show)
 
-data Program = Prog [Global]
+data Program a = Prog [(Global a)]
   deriving (Eq, Ord, Show)
 
-testProg = Prog
-  [ GMacro "include" ["<stdio.h>"]
-  , GMacro "define" ["PI", "3.14159265458979323846"]
-  , GStruct "tf"
-    [ (TInt, "a")
-    , (TChar, "b")
-    ]
-  , GFuncDeclare Nothing TInt "foo" [(TInt, "")]
-  , GFuncDef Nothing TInt "main" [(TInt, "argc"), (TPointer (TPointer TChar), "argv")] (SScope
-    [ SVarDecl TInt "test"
-    , SVarDef TAuto "fwef" (ECall "skepu::Map<2>" [])
-    , SVarDef TAuto "fwef" (ECall "skepu::Reduce" [ELambda [] [(TInt, "a"), (TInt, "b")] (SScope [SReturn . Just $ EBinOp Add (EVar "a") (EVar "b")])])
-    , SArrayDecl TChar "s" [(EInt 2), (EInt 3)]
-    , SVarAssign "test" (EInt 1)
-    , SVarAssign "test" $ ECall "foo" [EVar "test"]
-    , SIf (EBinOp Less (EVar "test") (EInt 10)) (SExpr $ EUnOp PostIncrement $ EVar "test") (Just $ SExpr $ EUnOp PostDecrement $ EVar "test")
-    , SIf (EBinOp Less (EVar "test") (EInt 10)) (SScope [SExpr $ EUnOp PostIncrement $ EVar "test"]) (Just $ SScope [SExpr $ EUnOp PostDecrement $ EVar "test"])
-    ])
-  ]
+-- testProg = Prog
+--   [ GMacro "include" ["<stdio.h>"]
+--   , GMacro "define" ["PI", "3.14159265458979323846"]
+--   , GStruct "tf"
+--     [ (TInt, "a")
+--     , (TChar, "b")
+--     ]
+--   , GFuncDeclare Nothing TInt "foo" [(TInt, "")]
+--   , GFuncDef Nothing TInt "main" [(TInt, "argc"), (TPointer (TPointer TChar), "argv")] (SScope
+--     [ SVarDecl TInt "test"
+--     , SVarDef TAuto "fwef" (ECall "skepu::Map<2>" [])
+--     , SVarDef TAuto "fwef" (ECall "skepu::Reduce" [ELambda [] [(TInt, "a"), (TInt, "b")] (SScope [SReturn . Just $ EBinOp Add (EVar "a") (EVar "b")])])
+--     , SArrayDecl TChar "s" [(EInt 2), (EInt 3)]
+--     , SVarAssign "test" (EInt 1)
+--     , SVarAssign "test" $ ECall "foo" [EVar "test"]
+--     , SIf (EBinOp Less (EVar "test") (EInt 10)) (SExpr $ EUnOp PostIncrement $ EVar "test") (Just $ SExpr $ EUnOp PostDecrement $ EVar "test")
+--     , SIf (EBinOp Less (EVar "test") (EInt 10)) (SScope [SExpr $ EUnOp PostIncrement $ EVar "test"]) (Just $ SScope [SExpr $ EUnOp PostDecrement $ EVar "test"])
+--     ])
+--   ]
 
 -- >>> pretty testProg
 -- #include <stdio.h>
@@ -214,7 +216,7 @@ testProg = Prog
 --     }
 -- }
 
-instance Pretty Type where
+instance (Pretty a) => Pretty (Type a) where
   pretty = \case
     TVoid -> pretty "void"
     TInt -> pretty "int"
@@ -229,8 +231,8 @@ instance Pretty Type where
       pretty ret <+> pretty "(*)"
         <> parens
           ( case args of
-            [] -> pretty "void"
-            _ -> hsep . punctuate comma . map pretty $ args
+              [] -> pretty "void"
+              _ -> hsep . punctuate comma . map pretty $ args
           )
     TConstructor con inner -> pretty con <> angles (pretty inner)
     -- Note: for plain C __auto_type would be better, but SKePU is C++ and c++
@@ -238,7 +240,7 @@ instance Pretty Type where
     -- meaning as __auto_type and thus similar to C++ auto.
     TAuto -> pretty "auto"
 
-instance Pretty Expression where
+instance (Pretty a) => Pretty (Expression a) where
   pretty = \case
     EVar x -> pretty x
     EInt i -> pretty i
@@ -259,14 +261,15 @@ instance Pretty Expression where
     EMemberAccess e f -> pretty e <> pretty "." <> pretty f
     EPointerAccess e f -> pretty e <> pretty "->" <> pretty f
     EParen e -> parens $ pretty e
-    EStatement s e -> parens . braces $
-      line <> (indent 4 . vsep . map needsSemi $ s) <> pretty e <> semi <> line
+    EStatement s e ->
+      parens . braces $
+        line <> (indent 4 . vsep . map needsSemi $ s) <> pretty e <> semi <> line
     ELambda capture params body ->
       pretty capture
         <> parens (hsep . punctuate comma $ (map prettyParam params))
-        <+> pretty body
+          <+> pretty body
 
-instance Pretty Statement where
+instance (Pretty a) => Pretty (Statement a) where
   pretty = \case
     SExpr e -> pretty e
     SVarDecl t@(TPointer _) n ->
@@ -294,29 +297,31 @@ instance Pretty Statement where
         <> pretty "else"
         <> nestOrScope' s2
     SIf e s1 Nothing ->
-      pretty "if" <> parens (pretty e)
+      pretty "if"
+        <> parens (pretty e)
         <> nestOrScope' s1
     SWhile expr bodyS ->
       pretty "while" <+> parens (pretty expr)
         <> nestOrScope' bodyS
     SFor initS expr updS bodyS ->
-      pretty "for" <+> parens (pretty initS <> semi <+> pretty expr <> semi <+> pretty updS)
-      <+> nestOrScope bodyS
+      pretty "for"
+        <+> parens (pretty initS <> semi <+> pretty expr <> semi <+> pretty updS)
+        <+> nestOrScope bodyS
     SBreak -> pretty "break"
     SReturn (Just e) -> pretty "return" <+> pretty e
     SReturn Nothing -> pretty "return"
     SGoto l -> pretty "goto" <+> pretty l
     SLabel l -> pretty l <> colon
 
-nestOrScope :: Statement -> Doc ann
+nestOrScope :: (Pretty a) => (Statement a) -> Doc ann
 nestOrScope s = case s of
   SScope _ -> space <> needsSemi s <> space
   _ -> line <> (indent 4 . needsSemi $ s) <> line
-nestOrScope' :: Statement -> Doc ann
+nestOrScope' :: (Pretty a) => (Statement a) -> Doc ann
 nestOrScope' s = case s of
   SScope _ -> space <> needsSemi s
   _ -> line <> (indent 4 . needsSemi $ s)
-needsSemi :: Statement -> Doc ann
+needsSemi :: (Pretty a) => (Statement a) -> Doc ann
 needsSemi s = case s of
   SExpr _ -> pretty s <> semi
   SVarDecl _ _ -> pretty s <> semi
@@ -334,7 +339,7 @@ needsSemi s = case s of
   SGoto _ -> pretty s <> semi
   SLabel _ -> pretty s
 
-instance Pretty Global where
+instance (Pretty a) => Pretty (Global a) where
   pretty global = case global of
     GFuncDeclare (Just storageClass) returnType funcId parameters ->
       pretty storageClass
@@ -355,7 +360,7 @@ instance Pretty Global where
         <> line
         <> pretty body
     GFuncDef Nothing returnType funcId parameters body ->
-        pretty returnType
+      pretty returnType
         <+> pretty funcId
         <+> (parens . hsep . punctuate comma . map prettyParam) parameters
         <> line
@@ -364,23 +369,25 @@ instance Pretty Global where
       pretty varType <+> pretty varId
     GVarDef varType varId expression ->
       pretty varType
-      <+> pretty varId
-      <+> pretty "="
-      <+> pretty expression
+        <+> pretty varId
+        <+> pretty "="
+        <+> pretty expression
     GStruct structId fields ->
       pretty "struct"
-      <+> pretty structId
-      <+> braces (line
-          <> (indent 4 . vsep . map (<> semi) . map prettyParam) fields
-          <> line)
-          <> semi
+        <+> pretty structId
+        <+> braces
+          ( line
+              <> (indent 4 . vsep . map (<> semi) . map prettyParam) fields
+              <> line
+          )
+        <> semi
     GMacro macro opt ->
       pretty "#" <> pretty macro <+> (hsep . map pretty) opt
 
-prettyParam :: Pretty a => (Type, a) -> Doc ann
+prettyParam :: (Pretty a) => ((Type a), IR.Id a) -> Doc ann
 prettyParam (t@(TPointer _), i) = pretty t <> pretty i
 prettyParam (t, i) = pretty t <+> pretty i
 
-instance Pretty Program where
+instance (Pretty a) => Pretty (Program a) where
   pretty (Prog globals) =
     vsep . map pretty $ globals

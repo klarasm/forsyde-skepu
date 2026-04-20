@@ -60,17 +60,20 @@ instance Eq a => Eq (Id a) where
   (==) (Ix ix1) (Ix ix2) = ix1 == ix2
   (==) (ExId n1) (ExId n2) = n1 == n2
   (==) _ _ = False
-instance Show a => Show (Id a) where
-  show = \case
-    Empty -> ""
+instance Pretty a => Pretty (Id a) where
+  pretty = \case
+    Empty -> pretty ""
     Direct binder -> getString binder
-    Nested parent binder -> show parent <> "_" <> show binder
-    Ix ix -> show ix
-    ExId n -> show n
+    Nested parent binder -> pretty parent <> pretty "_" <> pretty binder
+    Ix ix -> pretty ix
+    ExId n -> pretty n
     where
-      getString binder = getOccString binder <> "_" <> (show . getUnique) binder
-instance Show a => Pretty (Id a) where
-  pretty = unsafeViaShow
+      getString binder =
+        (pretty . getOccString) binder
+          <> pretty "_"
+          <> (pretty . show . getUnique) binder
+instance Pretty a => Show (Id a) where
+  show = show . pretty
 
 instance Semigroup (Id a) where
   (<>) Empty i = i
@@ -98,7 +101,7 @@ instance Applicative Id where
   Direct i <*>  _ = Direct i
   Ix i <*> _ = Ix i
 
-showSloppy :: Show a => (Id a) -> String
+showSloppy :: Pretty a => (Id a) -> String
 showSloppy = \case
   Empty -> ""
   Direct binder -> getOccString binder

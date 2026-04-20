@@ -26,13 +26,39 @@ import qualified CIR
 import qualified Data.Set as S
 import Prettyprinter
 
+data IdExt
+  = Name String
+  | Input
+  | Output
+  | Tmp
+  | IVector
+  | IMatrix
+  | IEmpty
+  | Reduce
+  deriving (Eq, Ord, Show)
+
+instance Pretty IdExt where
+  pretty (Name s) = pretty s
+  pretty Input = pretty "input"
+  pretty Output = pretty "output"
+  pretty Tmp = pretty "tmp"
+  pretty IVector = pretty "skepu::Vector"
+  pretty IMatrix = pretty "skepu::Matrix"
+  pretty IEmpty = mempty
+  pretty Reduce = pretty "skepu::Reduce"
+
+type CType = CIR.Type IdExt
+type CExpression = CIR.Expression IdExt
+type CStatement = CIR.Statement IdExt
+type CProgram = CIR.Program IdExt
+
 data (Show a) => Context a = Context
   { from :: Id ()
-  , ret :: CIR.Type
-  , inputs :: [(CIR.Type, String)]
-  , outputs :: [(CIR.Type, String)]
-  , delayStorage :: S.Set (CIR.Type, String, CIR.Expression)
-  , body :: CIR.Statement
+  , ret :: CType
+  , inputs :: [(CType, Id IdExt)]
+  , outputs :: [(CType, Id IdExt)]
+  , delayStorage :: S.Set (CType, Id IdExt, CExpression)
+  , body :: CStatement
   }
   deriving (Show)
 instance (Show a, Pretty a) => Pretty (Context a) where
@@ -50,19 +76,19 @@ instance (Show a, Pretty a) => Pretty (Context a) where
 class Synthesizable a where
   -- may need to resolve a previously unresolved process as dependency
   synthesize :: [a] -> a -> ([Context a], [Context a]) -> ([Context a], [Context a])
-  compose :: ([Context a], [Context a]) -> CIR.Program
+  compose :: ([Context a], [Context a]) -> CProgram
 
-portToC :: Port -> CIR.Type
+portToC :: Port -> CType
 portToC = \case
   Signal a _ _ -> portToC a
   AbstExt a _ -> portToC a
   Vector (Vector p _) _ ->
-    CIR.TConstructor (CIR.TIdent "skepu::Matrix") (portToC p)
+    CIR.TConstructor (CIR.TIdent $ ExId IMatrix) (portToC p)
   Vector p _ ->
-    CIR.TConstructor (CIR.TIdent "skepu::Vector") (portToC p)
+    CIR.TConstructor (CIR.TIdent $ ExId IVector) (portToC p)
   Opaque t -> typeToCType t
 
-typeToCType :: Type -> CIR.Type
+typeToCType :: Type -> CType
 typeToCType = \case
     TyVarTy v
       | getOccString v == "Int" -> CIR.TInt
@@ -93,20 +119,20 @@ typeToCType = \case
     TyConApp v a -> error $ "TyConApp: " <> (getOccString . tyConName) v <> " " <> showPprUnsafe a
     t -> error $ "Something else: " <> showPprUnsafe t
 
-exprToCType :: CoreExpr -> CIR.Type
+exprToCType :: CoreExpr -> CType
 exprToCType = \case
   Type t -> typeToCType t
   Var v -> typeToCType . varType $ v
   _ -> error "Not a type!"
 
-varToCDef :: Var -> (CIR.Type, String)
+varToCDef :: Var -> (CType, Id IdExt)
 varToCDef v =
   let port = makePort . varType $ v
       ty = portToC port
-      name = show $ (Direct v :: Id ())
+      name = Direct v
    in (ty, name)
 
-argToCDef :: Var -> (CIR.Type, String)
+argToCDef :: Var -> (CType, Id IdExt)
 argToCDef = (\(t, n) -> (CIR.TPointer t, n)) . varToCDef
 
 getDelayExpr :: CoreExpr -> Maybe CoreExpr
@@ -114,20 +140,20 @@ getDelayExpr = \case
   App (App (Var v) _) e | isDelayVar v -> Just e
   _ -> Nothing
 
-delayExprToC :: CoreExpr -> CIR.Expression
+delayExprToC :: CoreExpr -> CExpression
 delayExprToC = \case
   App (Var _) (Lit (LitNumber _ i)) -> CIR.EInt . fromIntegral $ i
   _ -> undefined
 
-inputArgs :: [CIR.Expression]
-inputArgs = map (CIR.EVar . ("input_" <>) . show) [0 :: Integer ..]
-outputArgs :: [CIR.Expression]
-outputArgs = map (CIR.EVar . ("output_" <>) . show) [0 :: Integer ..]
+inputArgs :: [CExpression]
+inputArgs = map (CIR.EVar . (ExId Input <>) . Ix) [0 :: Int ..]
+outputArgs :: [CExpression]
+outputArgs = map (CIR.EVar . (ExId Output <>) . Ix) [0 :: Int ..]
 
-vertexToExpr :: Foldable t => t Var -> [Context a] -> Vertex -> CIR.Expression
+vertexToExpr :: Foldable t => t Var -> [Context a] -> Vertex -> CExpression
 vertexToExpr pointers context Vertex { id = _, .. } = case process of
   Right _ -> undefined
-  Left v -> CIR.ECall (show v) $ map ioToExpr inputs <> map ioToExpr outputs <> (delayParams v)
+  Left v -> CIR.ECall (const IEmpty <$> v) $ map ioToExpr inputs <> map ioToExpr outputs <> (delayParams v)
   where
     delayParams v =
       S.elems
@@ -138,13 +164,13 @@ vertexToExpr pointers context Vertex { id = _, .. } = case process of
         $ context
     ioToExpr io =
       if elem io pointers
-        then CIR.EVar . show $ (Direct io :: Id ())
-        else CIR.EReference . CIR.EVar . show $ (Direct io :: Id ())
+        then CIR.EVar $ Direct io
+        else CIR.EReference . CIR.EVar $ Direct io
 
-mkTemp :: (Num a, Show a) => a -> (a, String)
-mkTemp ix = (ix+1, "tmp_" <> show ix)
+mkTemp :: Int -> (Int, Id IdExt)
+mkTemp ix = (ix+1, ExId Tmp <> Ix ix)
 
-exprToCExpr' :: Integer -> [Var] -> CoreExpr -> (Integer, [CIR.Statement], CIR.Expression)
+exprToCExpr' :: Int -> [Var] -> CoreExpr -> (Int, [CStatement], CExpression)
 exprToCExpr' tmpix args expr = case expr of
   Lit (LitNumber _ i) -> (tmpix, [], CIR.EInt $ fromIntegral i)
   App _ (Lit (LitNumber _ i)) -> (tmpix, [], CIR.EInt $ fromIntegral i)
@@ -158,7 +184,7 @@ exprToCExpr' tmpix args expr = case expr of
           outvarref = CIR.EReference outvar
        in ( tmpix1
           , [ CIR.SVarDecl CIR.TInt outname
-            , CIR.SExpr $ CIR.ECall (show $ (Direct v :: Id ())) $
+            , CIR.SExpr $ CIR.ECall (Direct v) $
               zipWith const inputArgs inputs <> zipWith const [outvarref] outputs
             ]
           , outvar
@@ -167,13 +193,13 @@ exprToCExpr' tmpix args expr = case expr of
   App (App (Var f) t) (Var v) | typeOrConstraint t && (not $ typeOrConstraint $ Var v) ->
     case varToArg args v of
       Just arg ->
-         (tmpix, [], CIR.ECall (getOccString f) [arg])
+         (tmpix, [], CIR.ECall (Direct f) [arg])
       Nothing -> error $ "Var not in args! " <> showPprUnsafe expr
   -- A binary function passed as a value (with type constraints). Construct a lambda
   App (App (Var f) t1) t2 | typeOrConstraint t1 && typeOrConstraint t2 ->
-    let in1 = "input_0"
+    let in1 = ExId Input <> Ix 0
         t1' = exprToCType t1
-        in2 = "input_1"
+        in2 = ExId Input <> Ix 1
         t2' = exprToCType t2
         (tmpix', stmts, expr') = resolveBinOp tmpix [] (CIR.EVar in1) (CIR.EVar in2) (getOccString f)
         expr'' = CIR.ELambda [] [(t1', in1), (t2', in2)] $ CIR.SScope [CIR.SReturn . Just $ expr']
@@ -197,14 +223,14 @@ exprToCExpr' tmpix args expr = case expr of
      in resolveBinOp tmpix2 (stmts1 <> stmts2) expr1 expr2 $ getOccString f
   e -> error . showPprUnsafe $ e
 
-skelToSkePU :: String -> String
+skelToSkePU :: String -> Id IdExt
 skelToSkePU = \case
-  "reduce" -> "skepu::Reduce"
+  "reduce" -> ExId Reduce
   _ -> undefined
 
 resolveBinOp ::
-  Integer -> [CIR.Statement] -> CIR.Expression -> CIR.Expression -> String
-  -> (Integer, [CIR.Statement], CIR.Expression)
+  Int -> [CStatement] -> CExpression -> CExpression -> String
+  -> (Int, [CStatement], CExpression)
 resolveBinOp tmpix stmts expr1 expr2 = \case
   "+" -> (tmpix, stmts, CIR.EBinOp CIR.Add expr1 expr2)
   "*" -> (tmpix, stmts, CIR.EBinOp CIR.Multiply expr1 expr2)
@@ -214,26 +240,26 @@ resolveBinOp tmpix stmts expr1 expr2 = \case
   "div" -> error "Haskell `div` rounds to negative infinity, not implemented. Consider using `quot`"
   u -> error $ "Unknown function: " <> u
 
-varToArg :: Eq a => [a] -> a -> Maybe CIR.Expression
+varToArg :: Eq a => [a] -> a -> Maybe CExpression
 varToArg args v =
-  elemIndex v args >>= \ix -> pure . CIR.EVar $ "input_" <> show ix
+  elemIndex v args >>= \ix -> pure . CIR.EVar $ ExId Input <> Ix ix
 
-exprToCExpr :: Integer -> [Var] -> CoreExpr -> (Integer, [CIR.Statement], CIR.Expression)
+exprToCExpr :: Int -> [Var] -> CoreExpr -> (Int, [CStatement], CExpression)
 exprToCExpr counter args expr = case expr of
   App (App (App (Var f) _) _) (Var v) ->
     case varToArg args v of
       Just arg ->
-         (counter, [], CIR.ECall (getOccString f) [arg])
+         (counter, [], CIR.ECall (Direct f) [arg])
       Nothing -> error "Var not in args!"
   -- A binary operator passed as a value. Apply it to the input arguments
   App (App (Var f) t1) t2 | typeOrConstraint t1 && typeOrConstraint t2 ->
-    let v1 = CIR.EDereference $ CIR.EVar "input_0"
-        v2 = CIR.EDereference $ CIR.EVar "input_1"
+    let v1 = CIR.EDereference $ CIR.EVar $ ExId Input <> Ix 0
+        v2 = CIR.EDereference $ CIR.EVar $ ExId Input <> Ix 1
      in resolveBinOp counter [] v1 v2 $ getOccString f
   -- A partially applied binary operator passed as a value. Apply it to the input argument
   App (App (App (Var f) t1) t2) e | typeOrConstraint t1 && typeOrConstraint t2 ->
     let (tmpix1, stmts1, e1) = exprToCExpr' counter args e
-        v1 = CIR.EDereference $ CIR.EVar "input_0"
+        v1 = CIR.EDereference $ CIR.EVar $ ExId Input <> Ix 0
      in resolveBinOp tmpix1 stmts1 e1 v1 $ getOccString f
   -- Inner function applied to a function. Apply it to the input arguments
   App (App (Var inner) t) e | typeOrConstraint t && (not $ typeOrConstraint e) ->
@@ -249,13 +275,13 @@ exprToCExpr counter args expr = case expr of
           [ CIR.SVarDecl ty outname
           , CIR.SVarDef CIR.TAuto skelInstance $ CIR.ECall skel [e1]
           , CIR.SExpr $ CIR.ECall skelInstance $
-              [ CIR.EVar outname, CIR.EDereference $ CIR.EVar "input_0" ]
+              [ CIR.EVar outname, CIR.EDereference $ CIR.EVar $ ExId Input <> Ix 0 ]
           ]
     in
       (tmpix3, stmts1 <> stmts, CIR.EVar outname)
   e -> exprToCExpr' counter args e
 
-bodyToStatement :: CoreExpr -> CIR.Statement
+bodyToStatement :: CoreExpr -> CStatement
 bodyToStatement = \case
   App (App (App (App (App (App (App (App (App (Var v) _) _) _) _) _) _) _) _) e ->
     error $ "9App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
@@ -275,8 +301,8 @@ bodyToStatement = \case
          in
           CIR.SScope $
             init1 <> init2 <>
-            [ CIR.SAssign (CIR.EDereference $ CIR.EVar "output_0") ea1
-            , CIR.SAssign (CIR.EDereference $ CIR.EVar "output_1") ea2
+            [ CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 0) ea1
+            , CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 1) ea2
             ]
       e' -> error . showPprUnsafe $ e'
     | otherwise ->
@@ -287,7 +313,7 @@ bodyToStatement = \case
           (_, init1, ea1) = exprToCExpr 0 args expr
        in CIR.SScope $
           init1 <>
-          [ CIR.SAssign (CIR.EDereference $ CIR.EVar "output_0") ea1
+          [ CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 0) ea1
           ]
     | getOccString v == "comb12" ->
       let (args, expr) = collectBinders e
@@ -298,8 +324,8 @@ bodyToStatement = \case
          in CIR.SScope $
             init1 <>
             init2 <>
-            [ CIR.SAssign (CIR.EDereference $ CIR.EVar "output_0") $ ea1
-            , CIR.SAssign (CIR.EDereference $ CIR.EVar "output_1") $ ea2
+            [ CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 0) $ ea1
+            , CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 1) $ ea2
             ]
       e' -> error . showPprUnsafe $ e'
     | otherwise ->
@@ -311,13 +337,13 @@ bodyToStatement = \case
          in
           CIR.SScope $
             init1 <>
-            [ CIR.SAssign (CIR.EDereference $ CIR.EVar "output_0") $ ea1
+            [ CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 0) $ ea1
             ]
     | otherwise ->
       error $ "3App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
   App (App (Var v) _) e
     | getOccString v == "delay" -> CIR.SScope
-      [ CIR.SAssign (CIR.EDereference $ CIR.EVar "output_0") (CIR.EDereference $ CIR.EVar "input_0")
+      [ CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 0) (CIR.EDereference . CIR.EVar $ ExId Input <> Ix 0)
       ]
     | otherwise ->
       error $ "2App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
@@ -327,7 +353,7 @@ bodyToStatement = \case
   e@(Lam _ _) ->
     let (args, expr') = collectBinders e
         (_, stmts, expr) = exprToCExpr 0 args expr'
-        output = CIR.EDereference $ CIR.EVar "output_0"
+        output = CIR.EDereference . CIR.EVar $ ExId Output <> Ix 0
      in CIR.SScope $
       stmts
       <> [CIR.SAssign output $ expr]
@@ -340,13 +366,13 @@ instance Synthesizable Process where
     _ ->
       case subsystem of
         Nothing ->
-          let inDefs = zip (map (CIR.TPointer . portToC) inports) $ map (("input_"<>) . show) [0 :: Int ..]
-              outDefs = zip (map (CIR.TPointer . portToC) outports) $ map (("output_"<>) . show) [0 :: Int ..]
+          let inputs = zip (map (CIR.TPointer . portToC) inports) $ map ((ExId Input <>) . Ix) [0 :: Int ..]
+              outputs = zip (map (CIR.TPointer . portToC) outports) $ map ((ExId Output <>) . Ix) [0 :: Int ..]
               context = Context
                 { from = binder
                 , ret = CIR.TVoid
-                , inputs = inDefs
-                , outputs = outDefs
+                , inputs
+                , outputs
                 , delayStorage = mempty
                 , body = bodyToStatement body
                 }
@@ -398,25 +424,25 @@ instance Synthesizable Process where
   compose (mainC, allC) = CIR.Prog $ [stdio] <> forwardDecls <> defs <> map main mainC
     where
       (forwardDecls, defs) = unzip . map contextToGlobal $ allC
-      stdio = CIR.GMacro "include" ["<stdio.h>"]
+      stdio = CIR.GMacro (ExId $ Name "include") [ExId $ Name "<stdio.h>"]
       removePoint = \case
         CIR.TPointer t -> t
         t -> t
-      getInput ret (t, v) = CIR.SVarAssign ret (CIR.ECall "scanf" [CIR.EString $ typeToFormat t, CIR.EReference $ CIR.EVar v])
-      putOutput (t, v) = CIR.SExpr $ CIR.ECall "printf" [CIR.EString $ typeToFormat t <> "\\n", CIR.EVar v]
+      getInput ret (t, v) = CIR.SVarAssign ret (CIR.ECall (ExId $ Name "scanf") [CIR.EString $ typeToFormat t, CIR.EReference $ CIR.EVar v])
+      putOutput (t, v) = CIR.SExpr $ CIR.ECall (ExId $ Name "printf") [CIR.EString $ typeToFormat t <> "\\n", CIR.EVar v]
       typeToFormat ty = case removePoint ty of
         CIR.TInt -> "%d"
         CIR.TFloat -> "%f"
         CIR.TChar -> "%c"
         t -> error $ "unknown format string for " <> show t
       getArg (_, v) = CIR.EReference $ CIR.EVar v
-      statusVar = "status"
+      statusVar = ExId $ Name "status"
       main Context{..} =
         CIR.GFuncDef
           Nothing
           CIR.TInt
-          "main"
-          [(CIR.TInt, "argc"), (CIR.TPointer $ CIR.TPointer $ CIR.TChar, "argv")]
+          (ExId $ Name "main")
+          [(CIR.TInt, ExId $ Name "argc"), (CIR.TPointer . CIR.TPointer $ CIR.TChar, ExId $ Name"argv")]
           $ CIR.SScope
           $ map (\(t, v, e) -> CIR.SVarDef (removePoint t) v e) (S.elems delayStorage)
             <> [ CIR.SWhile (CIR.EInt 1) $
@@ -430,7 +456,7 @@ instance Synthesizable Process where
                               Nothing
                           ]
                        <> [ CIR.SExpr $
-                              CIR.ECall (show from) $
+                              CIR.ECall (const IEmpty <$> from) $
                                 map getArg $
                                   inputs <> outputs <> (map (\(t, v, _) -> (t, v)) $ S.elems delayStorage)
                           ]
@@ -438,9 +464,9 @@ instance Synthesizable Process where
                ]
             <> [CIR.SReturn $ Just $ CIR.EInt $ -1]
       contextToGlobal Context { .. } =
-        ( CIR.GFuncDeclare (Just CIR.Static) CIR.TVoid (show from) $
+        ( CIR.GFuncDeclare (Just CIR.Static) CIR.TVoid (const IEmpty <$> from) $
           inputs <> outputs <> (map (\(t, n, _) -> (t, n)) . S.elems) delayStorage
-        , CIR.GFuncDef (Just CIR.Static) CIR.TVoid (show from)
+        , CIR.GFuncDef (Just CIR.Static) CIR.TVoid (const IEmpty <$> from)
             (inputs <> outputs <> (map (\(t, n, _) -> (t, n)) . S.elems) delayStorage)
             body
         )
