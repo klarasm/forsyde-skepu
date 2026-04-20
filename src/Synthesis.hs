@@ -141,6 +141,9 @@ vertexToExpr pointers context Vertex { id = _, .. } = case process of
         then CIR.EVar . show $ Direct io
         else CIR.EReference . CIR.EVar . show $ Direct io
 
+mkTemp :: (Num a, Show a) => a -> (a, String)
+mkTemp ix = (ix+1, "tmp_" <> show ix)
+
 exprToCExpr' :: Integer -> [Var] -> CoreExpr -> (Integer, [CIR.Statement], CIR.Expression)
 exprToCExpr' tmpix args expr = case expr of
   Lit (LitNumber _ i) -> (tmpix, [], CIR.EInt $ fromIntegral i)
@@ -150,10 +153,10 @@ exprToCExpr' tmpix args expr = case expr of
     -- Assume the Var is a function
     Nothing ->
       let (inputs, outputs) = extractTypes [] . varType $ v
-          outname = "tmp_" <> show tmpix
+          (tmpix1, outname) = mkTemp tmpix
           outvar = CIR.EVar outname
           outvarref = CIR.EReference outvar
-       in ( tmpix+1
+       in ( tmpix1
           , [ CIR.SVarDecl CIR.TInt outname
             , CIR.SExpr $ CIR.ECall (show $ Direct v) $
               zipWith const inputArgs inputs <> zipWith const [outvarref] outputs
@@ -181,7 +184,7 @@ exprToCExpr' tmpix args expr = case expr of
       case varToArg args v of
         Just v' ->
           let (tmpix', stmts, exprToCall) = exprToCExpr' (tmpix+1) args f
-              (tmpix'', toCall) = (tmpix'+1, "tmp_" <> show tmpix')
+              (tmpix'', toCall) = mkTemp tmpix'
               stmt = CIR.SVarDef CIR.TAuto toCall $
                 CIR.ECall (skelToSkePU $ getOccString inner) [CIR.EVar toCall]
            in
@@ -240,8 +243,8 @@ exprToCExpr counter args expr = case expr of
           Type t' -> t'
           Var v -> varType v
           _ -> undefined -- should not happen
-        (tmpix2, outname) = (tmpix1+1, "tmp_" <> show tmpix1)
-        (tmpix3, skelInstance) = (tmpix2+1, ("tmp_" <> show tmpix2))
+        (tmpix2, outname) = mkTemp tmpix1
+        (tmpix3, skelInstance) = mkTemp tmpix2
         stmts =
           [ CIR.SVarDecl ty outname
           , CIR.SVarDef CIR.TAuto skelInstance $ CIR.ECall skel [e1]
