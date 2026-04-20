@@ -189,6 +189,7 @@ instance Pretty Edge where
 
 data Port
   = Opaque Type
+  | AbstExt Port Type
   | Signal Port Type String
   | Vector Port Type
 
@@ -199,6 +200,9 @@ instance Pretty Port where
     Opaque ty ->
       pretty "OpaquePort"
         <> (parens . pretty . showPprUnsafe) ty
+    AbstExt inner _ ->
+      pretty "AbstExtPort"
+        <> (parens . pretty) inner
     Signal inner _ _ ->
       pretty "SignalPort"
         <> (parens . pretty) inner
@@ -236,12 +240,14 @@ makePort = \case
   t@(FunTy _ _ (TyVarTy v) ft_res) ->
     case getOccString v of
       "Signal" -> Signal (makePort ft_res) t (moduleString . getName $ v)
+      "AbstExt" -> AbstExt (makePort ft_res) t
       "Vector" -> Vector (makePort ft_res) t
       "Matrix" -> Vector (Vector (makePort ft_res) t) t
       _ -> Opaque t
   t@(TyConApp con app) ->
     case (getOccString con, app) of
       ("Signal", t':_) -> Signal (makePort t') t (moduleString . tyConName $ con)
+      ("AbstExt", t':_) -> AbstExt (makePort t') t
       ("Vector", t':_) -> Vector (makePort t') t
       ("Matrix", t':_) -> Vector (Vector (makePort t') t) t
       _ -> Opaque t

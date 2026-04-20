@@ -55,6 +55,7 @@ class Synthesizable a b where
 portToC :: Port -> CIR.Type
 portToC = \case
   Signal a _ _ -> portToC a
+  AbstExt a _ -> portToC a
   Vector (Vector p _) _ ->
     CIR.TConstructor (CIR.TIdent "skepu::Matrix") (portToC p)
   Vector p _ ->
