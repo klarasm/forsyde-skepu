@@ -264,7 +264,7 @@ instance Pretty Expression where
     ELambda capture params body ->
       pretty capture
         <> parens (hsep . punctuate comma $ (map prettyParam params))
-        <> pretty body
+        <+> pretty body
 
 instance Pretty Statement where
   pretty = \case

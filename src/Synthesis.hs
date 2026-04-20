@@ -92,6 +92,7 @@ typeToCType = \case
     TyConApp v a -> error $ "TyConApp: " <> (getOccString . tyConName) v <> " " <> showPprUnsafe a
     t -> error $ "Something else: " <> showPprUnsafe t
 
+exprToCType :: CoreExpr -> CIR.Type
 exprToCType = \case
   Type t -> typeToCType t
   Var v -> typeToCType . varType $ v
@@ -174,16 +175,17 @@ exprToCExpr' tmpix args expr = case expr of
         expr'' = CIR.ELambda [] [(t1', in1), (t2', in2)] $ CIR.SScope [CIR.SReturn . Just $ expr']
      in (tmpix', stmts, expr'')
   -- Inner function applied to a function and var
-  App (App (App (Var inner) t) f) (Var v) | typeOrConstraint t ->
-    case varToArg args v of
-      Just v' ->
-        let (tmpix', stmts, exprToCall) = exprToCExpr' (tmpix+1) args f
-            (tmpix'', toCall) = (tmpix'+1, "tmp_" <> show tmpix')
-            stmt = CIR.SVarDef CIR.TAuto toCall $
-              CIR.ECall (skelToSkePU $ getOccString inner) [CIR.EVar toCall]
-         in
-           (tmpix'', stmts <> [stmt], error $ show $ pretty stmt)
-      Nothing -> undefined
+  App (App (App (Var inner) t) f) v1@(Var v)
+    | typeOrConstraint t && (not $ typeOrConstraint v1) ->
+      case varToArg args v of
+        Just v' ->
+          let (tmpix', stmts, exprToCall) = exprToCExpr' (tmpix+1) args f
+              (tmpix'', toCall) = (tmpix'+1, "tmp_" <> show tmpix')
+              stmt = CIR.SVarDef CIR.TAuto toCall $
+                CIR.ECall (skelToSkePU $ getOccString inner) [CIR.EVar toCall]
+           in
+             (tmpix'', stmts <> [stmt], error $ show $ pretty stmt)
+        Nothing -> undefined
   -- Binary operator/function (with type variables)
   App (App (App (App (Var f) t1) t2) e1) e2 | typeOrConstraint t1 && typeOrConstraint t2 ->
     let (tmpix1, stmts1, expr1) = exprToCExpr' tmpix args e1
@@ -225,7 +227,7 @@ exprToCExpr counter args expr = case expr of
      in resolveBinOp counter [] v1 v2 $ getOccString f
   -- A partially applied binary operator passed as a value. Apply it to the input argument
   App (App (App (Var f) t1) t2) e | typeOrConstraint t1 && typeOrConstraint t2 ->
-    let (tmpix1, stmts1, e1) = exprToCExpr' tmpix1 args e
+    let (tmpix1, stmts1, e1) = exprToCExpr' counter args e
         v1 = CIR.EDereference $ CIR.EVar "input_0"
      in resolveBinOp tmpix1 stmts1 e1 v1 $ getOccString f
   e -> exprToCExpr' counter args e
