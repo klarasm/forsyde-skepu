@@ -145,10 +145,14 @@ delayExprToC = \case
   App (Var _) (Lit (LitNumber _ i)) -> CIR.EInt . fromIntegral $ i
   _ -> undefined
 
+inputIds :: [Id IdExt]
+inputIds = map ((ExId Input <>) . Ix) [0..]
 inputArgs :: [CExpression]
-inputArgs = map (CIR.EVar . (ExId Input <>) . Ix) [0 :: Int ..]
+inputArgs = map CIR.EVar inputIds
+outputIds :: [Id IdExt]
+outputIds = map ((ExId Output <>) . Ix) [0..]
 outputArgs :: [CExpression]
-outputArgs = map (CIR.EVar . (ExId Output <>) . Ix) [0 :: Int ..]
+outputArgs = map CIR.EVar outputIds
 
 vertexToExpr :: (Foldable t) => t Var -> [Context a] -> Vertex -> CExpression
 vertexToExpr pointers context Vertex{id = _, ..} = case process of
@@ -379,8 +383,8 @@ instance Synthesizable Process where
       _ ->
         case subsystem of
           Nothing ->
-            let inputs = zip (map (CIR.TPointer . portToC) inports) $ map ((ExId Input <>) . Ix) [0 :: Int ..]
-                outputs = zip (map (CIR.TPointer . portToC) outports) $ map ((ExId Output <>) . Ix) [0 :: Int ..]
+            let inputs = zip (map (CIR.TPointer . portToC) inports) inputIds
+                outputs = zip (map (CIR.TPointer . portToC) outports) outputIds
                 context =
                   Context
                     { from = binder
