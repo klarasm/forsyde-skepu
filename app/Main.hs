@@ -4,12 +4,13 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE NoFieldSelectors #-}
+
 module Main (main) where
 
-import Synthesis
 import IR
 import Options.Applicative
 import qualified Prettyprinter as P
+import Synthesis
 import Util
 
 data Arguments = Arguments

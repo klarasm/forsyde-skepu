@@ -1,10 +1,10 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE NoFieldSelectors #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
 
 module IR (
   System (..),
@@ -32,15 +32,15 @@ import Data.List (sort)
 import Data.Maybe (mapMaybe)
 import qualified Data.Set as S
 import GHC.Core
+import GHC.Core.DataCon
 import GHC.Core.TyCo.Rep
 import GHC.Core.TyCon
-import GHC.Core.DataCon
 import GHC.Core.Type
-import GHC.Types.Name (Name, nameModule, getName, getOccString)
+import GHC.Types.Name (Name, getName, getOccString, nameModule)
 import GHC.Types.Unique (getUnique)
 import GHC.Types.Var (isTyCoVar)
-import GHC.Utils.Outputable (showPprUnsafe)
 import GHC.Unit.Module (moduleName, moduleNameString)
+import GHC.Utils.Outputable (showPprUnsafe)
 
 import qualified Data.Graph as G
 import Prettyprinter
@@ -52,7 +52,7 @@ data Id a
   | Ix Int
   | ExId a
   deriving (Ord)
-instance Eq a => Eq (Id a) where
+instance (Eq a) => Eq (Id a) where
   (==) Empty _ = False
   (==) _ Empty = False
   (==) (Direct i1) (Direct i2) = i1 == i2
@@ -60,19 +60,19 @@ instance Eq a => Eq (Id a) where
   (==) (Ix ix1) (Ix ix2) = ix1 == ix2
   (==) (ExId n1) (ExId n2) = n1 == n2
   (==) _ _ = False
-instance Pretty a => Pretty (Id a) where
+instance (Pretty a) => Pretty (Id a) where
   pretty = \case
     Empty -> pretty ""
     Direct binder -> getString binder
     Nested parent binder -> pretty parent <> pretty "_" <> pretty binder
     Ix ix -> pretty ix
     ExId n -> pretty n
-    where
-      getString binder =
-        (pretty . getOccString) binder
-          <> pretty "_"
-          <> (pretty . show . getUnique) binder
-instance Pretty a => Show (Id a) where
+   where
+    getString binder =
+      (pretty . getOccString) binder
+        <> pretty "_"
+        <> (pretty . show . getUnique) binder
+instance (Pretty a) => Show (Id a) where
   show = show . pretty
 
 instance Semigroup (Id a) where
@@ -97,11 +97,11 @@ instance Applicative Id where
   (Nested f1 f2) <*> (Nested a1 a2) = Nested (f1 <*> a1) (f2 <*> a2)
   (Nested f1 f2) <*> a = Nested (f1 <*> a) (f2 <*> a)
   f <*> Nested a1 a2 = Nested (f <*> a1) (f <*> a2)
-  Empty  <*> _ = Empty
-  Direct i <*>  _ = Direct i
+  Empty <*> _ = Empty
+  Direct i <*> _ = Direct i
   Ix i <*> _ = Ix i
 
-showSloppy :: Pretty a => (Id a) -> String
+showSloppy :: (Pretty a) => (Id a) -> String
 showSloppy = \case
   Empty -> ""
   Direct binder -> getOccString binder
@@ -146,9 +146,9 @@ data Process = Process
   , body :: CoreExpr
   }
 instance Eq Process where
-  (==) Process { binder = b1 } Process { binder = b2} = b1 == b2
+  (==) Process{binder = b1} Process{binder = b2} = b1 == b2
 instance Ord Process where
-  compare Process { binder = b1 } Process { binder = b2} = compare b1 b2
+  compare Process{binder = b1} Process{binder = b2} = compare b1 b2
 instance Show Process where
   show = show . pretty
 instance Pretty Process where
@@ -187,9 +187,9 @@ instance Pretty Vertex where
           , either (pretty . show) pretty process
           ]
 instance Eq Vertex where
-  (==) Vertex {id = id1} Vertex {id = id2} = id1 == id2
+  (==) Vertex{id = id1} Vertex{id = id2} = id1 == id2
 instance Ord Vertex where
-  compare Vertex {id = id1} Vertex {id = id2} = compare id1 id2
+  compare Vertex{id = id1} Vertex{id = id2} = compare id1 id2
 
 -- An edge (signal) inside a system.
 -- Can only refer to local vertices.
@@ -269,10 +269,10 @@ makePort = \case
       _ -> Opaque t
   t@(TyConApp con app) ->
     case (getOccString con, app) of
-      ("Signal", t':_) -> Signal (makePort t') t (moduleString . tyConName $ con)
-      ("AbstExt", t':_) -> AbstExt (makePort t') t
-      ("Vector", t':_) -> Vector (makePort t') t
-      ("Matrix", t':_) -> Vector (Vector (makePort t') t) t
+      ("Signal", t' : _) -> Signal (makePort t') t (moduleString . tyConName $ con)
+      ("AbstExt", t' : _) -> AbstExt (makePort t') t
+      ("Vector", t' : _) -> Vector (makePort t') t
+      ("Matrix", t' : _) -> Vector (Vector (makePort t') t) t
       _ -> Opaque t
   t -> Opaque t
 
@@ -313,8 +313,9 @@ stripApps (expr, (x : xs)) = case expr of
   -- while keeping semantics.
   _ -> Nothing
 
--- | Attempt to strip matching Lam App pairs so we only need to bother with
--- eta-reduced processes
+{- | Attempt to strip matching Lam App pairs so we only need to bother with
+eta-reduced processes
+-}
 stripLamApps :: CoreExpr -> CoreExpr
 stripLamApps expr = case expr of
   -- Also strip corresponding type variables
@@ -332,8 +333,8 @@ makeProcess :: Id a -> [Process] -> Either (Int, CoreExpr, [Var], [Var]) CoreBin
 makeProcess parent procs = \case
   Right (Rec _) -> Nothing
   Right (NonRec bind expr') ->
-  -- A process needs at least an output. The case with no inputs is technically
-  -- a signal, but this can be useful for e.g. generators.
+    -- A process needs at least an output. The case with no inputs is technically
+    -- a signal, but this can be useful for e.g. generators.
     if length outports /= 0
       then
         Just
@@ -344,32 +345,33 @@ makeProcess parent procs = \case
             , subsystem
             , body
             , appliedInternal = case subsystem of
-              Just _ -> []
-              Nothing -> map Direct . getInternal procs [] $ body
+                Just _ -> []
+                Nothing -> map Direct . getInternal procs [] $ body
             }
       else Nothing
-    where
-      body = stripLamApps expr'
-      subsystem = translateExpr (Direct bind) procs body
-      (inports, outports) = makePorts . extractTypes [] $ varType bind
+   where
+    body = stripLamApps expr'
+    subsystem = translateExpr (Direct bind) procs body
+    (inports, outports) = makePorts . extractTypes [] $ varType bind
   Left (ix, body, inputs, outputs) ->
-        Just
-          Process
-            { binder = const () <$> parent <> Ix ix
-            , inports
-            , outports
-            , subsystem
-            , body
-            , appliedInternal = case subsystem of
-              Just _ -> []
-              Nothing -> map Direct . getInternal procs [] $ body
-            }
-    where
-      (inports, outports) = makePorts (varType <$> inputs, varType <$> outputs)
-      subsystem = translateExpr parent procs body
+    Just
+      Process
+        { binder = const () <$> parent <> Ix ix
+        , inports
+        , outports
+        , subsystem
+        , body
+        , appliedInternal = case subsystem of
+            Just _ -> []
+            Nothing -> map Direct . getInternal procs [] $ body
+        }
+   where
+    (inports, outports) = makePorts (varType <$> inputs, varType <$> outputs)
+    subsystem = translateExpr parent procs body
 
--- | Get all internal function applications of an expression
--- This is used to not filter out internal process applications
+{- | Get all internal function applications of an expression
+This is used to not filter out internal process applications
+-}
 getInternal :: [Process] -> [CoreBndr] -> CoreExpr -> [CoreBndr]
 getInternal procs acc = \case
   Let (NonRec _ e1) e2 ->
@@ -411,12 +413,16 @@ translateExpr parent procs expr' = out
     mapMaybe id . zipWith (makeVertex parent (procs <> processes)) [0 ..] $
       apps <> map (\(v, m) -> (Var v, [v], m)) inputMap
   edges = mconcat . map (makeEdge vertices) $ binds
-  sEdges = mapMaybe (\Edge {source, target} ->
-    if isDelayVertex (procs <> processes) vertices source
-      then Nothing
-      else Just $ (source, target)) edges
+  sEdges =
+    mapMaybe
+      ( \Edge{source, target} ->
+          if isDelayVertex (procs <> processes) vertices source
+            then Nothing
+            else Just $ (source, target)
+      )
+      edges
   graph = G.buildG (0, length vertices - 1) sEdges
-  selfEdges = any (\Edge {source, target} -> source == target) edges
+  selfEdges = any (\Edge{source, target} -> source == target) edges
   schedulable = not selfEdges && (all (\(G.Node _ forest) -> forest == []) . G.scc $ graph)
   out =
     if length vertices /= 0
@@ -434,11 +440,11 @@ translateExpr parent procs expr' = out
       else Nothing
 
 procsFromId :: Id a -> [Process] -> [Process]
-procsFromId var = filter (\Process { binder } -> binder == (const () <$> var))
+procsFromId var = filter (\Process{binder} -> binder == (const () <$> var))
 
 isDelayVertex :: [Process] -> [Vertex] -> Int -> Bool
 isDelayVertex processes vertices vid =
-  case mapMaybe (delayVertex processes) . filter (\Vertex {id = i} -> i == vid) $ vertices of
+  case mapMaybe (delayVertex processes) . filter (\Vertex{id = i} -> i == vid) $ vertices of
     _ : [] -> True
     _ -> False
 
@@ -449,9 +455,9 @@ delayVertex processes v = case delayProc processes v of
 
 delayProc :: [Process] -> Vertex -> [Process]
 delayProc processes = \case
-  Vertex { process = Right proc } ->
+  Vertex{process = Right proc} ->
     if isDelayProcess proc then [proc] else []
-  Vertex { process = Left var } ->
+  Vertex{process = Left var} ->
     filter isDelayProcess . procsFromId var $ processes
 
 isDelayVar :: Var -> Bool
@@ -460,7 +466,7 @@ isDelayVar v =
     && ((moduleString . getName) v == "ForSyDe.Atom.MoC.SY.Lib")
 
 isDelayProcess :: Process -> Bool
-isDelayProcess Process { body } =
+isDelayProcess Process{body} =
   case collectArgs body of
     (Var func, _args) -> isDelayVar func
     _ -> False
@@ -471,12 +477,14 @@ getProcesses parent acc = \case
   Let bind expr -> case makeProcess parent acc (Right bind) of
     Nothing -> getProcesses parent acc expr
     Just proc -> getProcesses parent (proc : acc) expr
-  Case (Var _) _ _ (Alt (DataAlt dc) _ e : _) | isTupleDataCon dc ->
-    getProcesses parent acc e
+  Case (Var _) _ _ (Alt (DataAlt dc) _ e : _)
+    | isTupleDataCon dc ->
+        getProcesses parent acc e
   -- Function composition
-  App (App (App (App (App (Var v) _) _) _) e1) e2 | "." == (getOccString . getName) v ->
-    let procs = getProcesses parent acc e1
-     in getProcesses parent procs e2
+  App (App (App (App (App (Var v) _) _) _) e1) e2
+    | "." == (getOccString . getName) v ->
+        let procs = getProcesses parent acc e1
+         in getProcesses parent procs e2
   _ -> acc
 
 {- | Get the applied signals of a subsystem
@@ -508,8 +516,9 @@ getSignals bindacc inputAcc acc = \case
       then getSignals bindacc inputAcc acc e
       else getSignals (a : bindacc) inputAcc acc e
   -- Add any top-level deconstructed input tuple mapping
-  Case (Var v) _ _ (Alt (DataAlt dc) b e : _) | elem v bindacc && isTupleDataCon dc ->
-    getSignals (b <> bindacc) ((v, b) : inputAcc) acc e
+  Case (Var v) _ _ (Alt (DataAlt dc) b e : _)
+    | elem v bindacc && isTupleDataCon dc ->
+        getSignals (b <> bindacc) ((v, b) : inputAcc) acc e
   Var v -> (bindacc, inputAcc, acc, [v])
   -- May be a tuple construction
   e ->
@@ -522,12 +531,13 @@ getSignals bindacc inputAcc acc = \case
             )
             args
      in case e' of
-      -- Is this actually a tuple constructor?
-      Var i | (>1) . length . snd . extractTypes [] $ varType i ->
-        (bindacc, inputAcc, acc, argvars)
-      _ -> (bindacc, inputAcc, acc, [])
-  where
-    isSignal = (0 ==) . length . fst . extractTypes [] . varType . fst
+          -- Is this actually a tuple constructor?
+          Var i
+            | (> 1) . length . snd . extractTypes [] $ varType i ->
+                (bindacc, inputAcc, acc, argvars)
+          _ -> (bindacc, inputAcc, acc, [])
+ where
+  isSignal = (0 ==) . length . fst . extractTypes [] . varType . fst
 
 -- | Resolve an application to a process, inputs and (potentially tupled) output
 getApplication ::
@@ -574,21 +584,23 @@ makeVertex :: Id a -> [Process] -> Int -> (CoreExpr, [Var], [Var]) -> Maybe Vert
 makeVertex parent procs ix = \case
   -- An application of a non-inline process
   (Var bind, inputs, outputs) ->
-    Just $ Vertex
-      { id = ix
-      , process = Left (Direct bind)
-      , inputs
-      , outputs
-      }
+    Just $
+      Vertex
+        { id = ix
+        , process = Left (Direct bind)
+        , inputs
+        , outputs
+        }
   -- An application of an inline process definition
   (expr, inputs, outputs) -> do
     process <- liftM Right $ makeProcess parent procs (Left (ix, expr, inputs, outputs))
-    pure $ Vertex
-      { id = ix
-      , process
-      , inputs
-      , outputs
-      }
+    pure $
+      Vertex
+        { id = ix
+        , process
+        , inputs
+        , outputs
+        }
 
 makeEdge :: [Vertex] -> CoreBndr -> [Edge]
 makeEdge vertices bind = [Edge bind] <*> source <*> targets
@@ -598,44 +610,44 @@ makeEdge vertices bind = [Edge bind] <*> source <*> targets
 
 -- | Gather all processes referenced by the one corresponding to the string
 filterUnused :: String -> System -> Maybe (Process, [Process])
-filterUnused procname System { .. } =
+filterUnused procname System{..} =
   case filter (procNamed procname) processes of
-    p@Process { .. } : _ ->
+    p@Process{..} : _ ->
       let internal' = S.elems . findInternal (S.fromList processes) $ p
           internal = mconcat . map (getUsedAndLiftNested $ S.fromList processes) $ internal'
        in case subsystem of
-        Just s ->
-          let (subsys, used) = filterUnusedSystem (S.fromList processes, mempty) s
-           in Just (p { subsystem = Just subsys }, S.elems (used <> internal))
-        _ -> Just (p, S.elems internal)
+            Just s ->
+              let (subsys, used) = filterUnusedSystem (S.fromList processes, mempty) s
+               in Just (p{subsystem = Just subsys}, S.elems (used <> internal))
+            _ -> Just (p, S.elems internal)
     _ -> Nothing
-  where
-    procNamed name Process { binder } = showSloppy binder == name
+ where
+  procNamed name Process{binder} = showSloppy binder == name
 
 filterUnusedSystem :: (S.Set Process, S.Set Process) -> System -> (System, S.Set Process)
-filterUnusedSystem (reachable, used) s@System { .. } =
-  (s { processes = [], vertices = vertices' }, subsysUsed)
-  where
-    processSet = S.fromList processes
-    subsysUsed = (mconcat . S.elems . S.map (getUsedAndLiftNested reachable)) used'
-    used' = usedByVertices used vertices
-    usedByVertices acc = (acc <>) . mconcat . map (vertexProcs $ reachable <> processSet)
-    vertices' = map removeInline vertices
-    removeInline v@Vertex { process } = case process of
-      Right Process { binder } -> v { process = Left binder }
-      _ -> v
+filterUnusedSystem (reachable, used) s@System{..} =
+  (s{processes = [], vertices = vertices'}, subsysUsed)
+ where
+  processSet = S.fromList processes
+  subsysUsed = (mconcat . S.elems . S.map (getUsedAndLiftNested reachable)) used'
+  used' = usedByVertices used vertices
+  usedByVertices acc = (acc <>) . mconcat . map (vertexProcs $ reachable <> processSet)
+  vertices' = map removeInline vertices
+  removeInline v@Vertex{process} = case process of
+    Right Process{binder} -> v{process = Left binder}
+    _ -> v
 
 -- findProc :: (Foldable t, Monoid (f Process), Applicative f) => Id -> t Process -> f Process
 -- findProc vid = foldMap (\p@Process { binder = i } -> if vid == i then pure p else mempty)
 
 findProc :: Id a -> S.Set Process -> S.Set Process
-findProc var = S.filter (\Process { binder } -> binder == (const () <$> var))
+findProc var = S.filter (\Process{binder} -> binder == (const () <$> var))
 findInternal :: S.Set Process -> Process -> S.Set Process
-findInternal reachable Process {appliedInternal} =
+findInternal reachable Process{appliedInternal} =
   mconcat $ findProc <$> appliedInternal <*> [reachable]
 
 vertexProcs :: S.Set Process -> Vertex -> S.Set Process
-vertexProcs reachable Vertex { process } = case process of
+vertexProcs reachable Vertex{process} = case process of
   Left p ->
     let procs = findProc p reachable
         internalApps = (mconcat . S.elems . S.map (findInternal $ reachable)) procs
@@ -645,8 +657,8 @@ vertexProcs reachable Vertex { process } = case process of
      in S.singleton p <> internalApps
 
 getUsedAndLiftNested :: S.Set Process -> Process -> S.Set Process
-getUsedAndLiftNested reachable p@Process { .. } = S.singleton p { subsystem = subsys } <> subsysUsed'
-  where
-    (subsys, subsysUsed') = case subsystem of
-      Just s' -> (\(a, b) -> (Just a, b)) . filterUnusedSystem (reachable, mempty) $ s'
-      Nothing -> (Nothing, mempty)
+getUsedAndLiftNested reachable p@Process{..} = S.singleton p{subsystem = subsys} <> subsysUsed'
+ where
+  (subsys, subsysUsed') = case subsystem of
+    Just s' -> (\(a, b) -> (Just a, b)) . filterUnusedSystem (reachable, mempty) $ s'
+    Nothing -> (Nothing, mempty)
