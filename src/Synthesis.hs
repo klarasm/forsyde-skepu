@@ -231,6 +231,24 @@ exprToCExpr counter args expr = case expr of
     let (tmpix1, stmts1, e1) = exprToCExpr' counter args e
         v1 = CIR.EDereference $ CIR.EVar "input_0"
      in resolveBinOp tmpix1 stmts1 e1 v1 $ getOccString f
+  -- Inner function applied to a function. Apply it to the input arguments
+  App (App (Var inner) t) e | typeOrConstraint t && (not $ typeOrConstraint e) ->
+    let (tmpix1, stmts1, e1) = exprToCExpr' counter args e
+        skel = skelToSkePU $ getOccString inner
+        ty = portToC . makePort $ case t of
+          Type t' -> t'
+          Var v -> varType v
+          _ -> undefined -- should not happen
+        (tmpix2, outname) = (tmpix1+1, "tmp_" <> show tmpix1)
+        (tmpix3, skelInstance) = (tmpix2+1, ("tmp_" <> show tmpix2))
+        stmts =
+          [ CIR.SVarDecl ty outname
+          , CIR.SVarDef CIR.TAuto skelInstance $ CIR.ECall skel [e1]
+          , CIR.SExpr $ CIR.ECall skelInstance $
+              [ CIR.EVar outname, CIR.EDereference $ CIR.EVar "input_0" ]
+          ]
+    in
+      (tmpix3, stmts1 <> stmts, CIR.EVar outname)
   e -> exprToCExpr' counter args e
 
 bodyToStatement :: CoreExpr -> CIR.Statement
