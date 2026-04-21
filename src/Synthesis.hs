@@ -183,10 +183,10 @@ data OutputLoc
 skelToSkePU :: String -> Maybe (OutputLoc, Id IdExt)
 skelToSkePU = \case
   "reduce" -> Just (Return, ExId Reduce)
-  "farm11" -> Just (FunArg, ExId Map)
-  "farm12" -> Just (FunArg, ExId Map)
-  "farm21" -> Just (FunArg, ExId Map <> (ExId . Name) "<2>")
-  "farm22" -> Just (FunArg, ExId Map <> (ExId . Name) "<2>")
+  "farm11" -> Just (FunArg, ExId Map <> (ExId $ Name "<1>"))
+  "farm12" -> Just (FunArg, ExId Map <> (ExId $ Name "<1>"))
+  "farm21" -> Just (FunArg, ExId Map <> (ExId $ Name "<2>"))
+  "farm22" -> Just (FunArg, ExId Map <> (ExId $ Name "<2>"))
   _ -> Nothing
 
 resolveBinOp ::
@@ -271,10 +271,26 @@ exprToCExpr tmpix outLoc args tout expr = case expr of
                in resolveBinOp tmpix2 (stmts1 <> stmts2) expr1 expr2 $ getOccString inner
   -- Binary operator/function (with type variables)
   App (App (App (App (Var f) t1) t2) e1) e2
-    | typeOrConstraint t1 && typeOrConstraint t2 ->
+    | typeOrConstraint t1 && typeOrConstraint t2 && (not $ typeOrConstraint e1) && (not $ typeOrConstraint e2) ->
         let (tmpix1, stmts1, expr1) = exprToCExpr tmpix FunArg args tout e1
             (tmpix2, stmts2, expr2) = exprToCExpr tmpix1 FunArg args tout e2
          in resolveBinOp tmpix2 (stmts1 <> stmts2) expr1 expr2 $ getOccString f
+  App (App (App (App (Var f) t1) t2) t3) e1
+    | typeOrConstraint t1 && typeOrConstraint t2 && typeOrConstraint t3 && (not $ typeOrConstraint e1) ->
+      case skelToSkePU (getOccString f) of
+      Just (ret, skel) ->
+        let (tmpix1, stmts1, e1') = exprToLambda tmpix ret args (exprToCType t3) e1
+            (tmpix2, outname) = mkTemp tmpix1
+            (tmpix3, skelInstance) = mkTemp tmpix2
+            stmts =
+              [ CIR.SVarDecl tout outname
+              , CIR.SVarDef CIR.TAuto skelInstance $ CIR.ECall skel [e1']
+              , CIR.SExpr $
+                  CIR.ECall skelInstance $
+                    [CIR.EVar outname, CIR.EDereference $ CIR.EVar $ ExId Input <> Ix 0]
+              ]
+         in (tmpix3, stmts1 <> stmts, CIR.EVar outname)
+      Nothing -> undefined
   -- A partially applied binary operator passed as a value. Apply it to the input argument
   App (App (App (Var f) t1) t2) e
     | typeOrConstraint t1 && typeOrConstraint t2 ->

@@ -65,6 +65,7 @@ instance (Pretty a) => Pretty (Id a) where
   pretty = \case
     Empty -> pretty ""
     Direct binder -> getString binder
+    Nested (ExId e1) (ExId e2) -> pretty e1 <> pretty e2
     Nested parent binder -> pretty parent <> pretty "_" <> pretty binder
     Ix ix -> pretty ix
     ExId n -> pretty n
