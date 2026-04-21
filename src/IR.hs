@@ -16,6 +16,7 @@ module IR (
   translate,
   filterUnused,
   makePort,
+  makePorts,
   isDelayVar,
   typeOrConstraint,
   delayVertex,

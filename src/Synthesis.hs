@@ -35,6 +35,7 @@ data IdExt
   | IMatrix
   | IEmpty
   | Reduce
+  | Map
   deriving (Eq, Ord, Show)
 
 instance Pretty IdExt where
@@ -46,6 +47,7 @@ instance Pretty IdExt where
   pretty IMatrix = pretty "skepu::Matrix"
   pretty IEmpty = mempty
   pretty Reduce = pretty "skepu::Reduce"
+  pretty Map = pretty "skepu::Map"
 
 type CType = CIR.Type IdExt
 type CExpression = CIR.Expression IdExt
@@ -121,8 +123,8 @@ typeToCType = \case
 
 exprToCType :: CoreExpr -> CType
 exprToCType = \case
-  Type t -> typeToCType t
-  Var v -> typeToCType . varType $ v
+  Type t -> portToC . makePort $ t
+  Var v -> portToC . makePort . varType $ v
   _ -> error "Not a type!"
 
 varToCDef :: Var -> (CType, Id IdExt)
@@ -146,11 +148,11 @@ delayExprToC = \case
   _ -> undefined
 
 inputIds :: [Id IdExt]
-inputIds = map ((ExId Input <>) . Ix) [0..]
+inputIds = map ((ExId Input <>) . Ix) [0 ..]
 inputArgs :: [CExpression]
 inputArgs = map CIR.EVar inputIds
 outputIds :: [Id IdExt]
-outputIds = map ((ExId Output <>) . Ix) [0..]
+outputIds = map ((ExId Output <>) . Ix) [0 ..]
 outputArgs :: [CExpression]
 outputArgs = map CIR.EVar outputIds
 
@@ -174,67 +176,18 @@ vertexToExpr pointers context Vertex{id = _, ..} = case process of
 mkTemp :: Int -> (Int, Id IdExt)
 mkTemp ix = (ix + 1, ExId Tmp <> Ix ix)
 
-exprToCExpr' :: Int -> [Var] -> CoreExpr -> (Int, [CStatement], CExpression)
-exprToCExpr' tmpix args expr = case expr of
-  Lit (LitNumber _ i) -> (tmpix, [], CIR.EInt $ fromIntegral i)
-  App _ (Lit (LitNumber _ i)) -> (tmpix, [], CIR.EInt $ fromIntegral i)
-  Var v -> case varToArg args v of
-    Just v' -> (tmpix, [], CIR.EDereference v')
-    -- Assume the Var is a function
-    Nothing ->
-      let (inputs, outputs) = extractTypes [] . varType $ v
-          (tmpix1, outname) = mkTemp tmpix
-          outvar = CIR.EVar outname
-          outvarref = CIR.EReference outvar
-       in ( tmpix1
-          ,
-            [ CIR.SVarDecl CIR.TInt outname
-            , CIR.SExpr $
-                CIR.ECall (Direct v) $
-                  zipWith const inputArgs inputs <> zipWith const [outvarref] outputs
-            ]
-          , outvar
-          )
-  -- Unary operator/function (with type variables)
-  App (App (Var f) t) (Var v) | typeOrConstraint t && (not $ typeOrConstraint $ Var v) ->
-    case varToArg args v of
-      Just arg ->
-        (tmpix, [], CIR.ECall (Direct f) [arg])
-      Nothing -> error $ "Var not in args! " <> showPprUnsafe expr
-  -- A binary function passed as a value (with type constraints). Construct a lambda
-  App (App (Var f) t1) t2
-    | typeOrConstraint t1 && typeOrConstraint t2 ->
-        let in1 = ExId Input <> Ix 0
-            t1' = exprToCType t1
-            in2 = ExId Input <> Ix 1
-            t2' = exprToCType t2
-            (tmpix', stmts, expr') = resolveBinOp tmpix [] (CIR.EVar in1) (CIR.EVar in2) (getOccString f)
-            expr'' = CIR.ELambda [] [(t1', in1), (t2', in2)] $ CIR.SScope [CIR.SReturn . Just $ expr']
-         in (tmpix', stmts, expr'')
-  -- Inner function applied to a function and var
-  App (App (App (Var inner) t) f) v1@(Var v)
-    | typeOrConstraint t && (not $ typeOrConstraint v1) ->
-        case varToArg args v of
-          Just v' ->
-            let (tmpix', stmts, exprToCall) = exprToCExpr' (tmpix + 1) args f
-                (tmpix'', toCall) = mkTemp tmpix'
-                stmt =
-                  CIR.SVarDef CIR.TAuto toCall $
-                    CIR.ECall (skelToSkePU $ getOccString inner) [CIR.EVar toCall]
-             in (tmpix'', stmts <> [stmt], error $ show $ pretty stmt)
-          Nothing -> undefined
-  -- Binary operator/function (with type variables)
-  App (App (App (App (Var f) t1) t2) e1) e2
-    | typeOrConstraint t1 && typeOrConstraint t2 ->
-        let (tmpix1, stmts1, expr1) = exprToCExpr' tmpix args e1
-            (tmpix2, stmts2, expr2) = exprToCExpr' tmpix1 args e2
-         in resolveBinOp tmpix2 (stmts1 <> stmts2) expr1 expr2 $ getOccString f
-  e -> error . showPprUnsafe $ e
+data OutputLoc
+  = FunArg
+  | Return
 
-skelToSkePU :: String -> Id IdExt
+skelToSkePU :: String -> Maybe (OutputLoc, Id IdExt)
 skelToSkePU = \case
-  "reduce" -> ExId Reduce
-  _ -> undefined
+  "reduce" -> Just (Return, ExId Reduce)
+  "farm11" -> Just (FunArg, ExId Map)
+  "farm12" -> Just (FunArg, ExId Map)
+  "farm21" -> Just (FunArg, ExId Map <> (ExId . Name) "<2>")
+  "farm22" -> Just (FunArg, ExId Map <> (ExId . Name) "<2>")
+  _ -> Nothing
 
 resolveBinOp ::
   Int ->
@@ -256,45 +209,137 @@ varToArg :: (Eq a) => [a] -> a -> Maybe CExpression
 varToArg args v =
   elemIndex v args >>= \ix -> pure . CIR.EVar $ ExId Input <> Ix ix
 
-exprToCExpr :: Int -> [Var] -> CoreExpr -> (Int, [CStatement], CExpression)
-exprToCExpr counter args expr = case expr of
-  App (App (App (Var f) _) _) (Var v) ->
+exprToLambda :: Int -> OutputLoc -> [Var] -> CType -> CoreExpr -> (Int, [CStatement], CExpression)
+exprToLambda tmpix outLoc args tout expr = case expr of
+  -- A function passed as a value (with type constraints). Construct a lambda
+  App (App (Var f) t1) t2
+    | typeOrConstraint t1 && typeOrConstraint t2 ->
+        case makePorts . extractTypes [] . varType $ f of
+          (a1 : a2 : [], out : []) ->
+            let in1 = ExId Input <> Ix 0
+                t1' = exprToCType t1
+                in2 = ExId Input <> Ix 1
+                t2' = exprToCType t2
+                (tmpix', stmts, expr') = resolveBinOp tmpix [] (CIR.EVar in1) (CIR.EVar in2) (getOccString f)
+                expr'' = CIR.ELambda [] [(t1', in1), (t2', in2)] $ CIR.SScope [CIR.SReturn . Just $ expr']
+             in (tmpix', stmts, expr'')
+          _ -> undefined
+  App (App (App (Var f) t1) t2) v1@(Var v)
+    | typeOrConstraint t1 && typeOrConstraint t2 && (not $ typeOrConstraint v1) ->
+        case (makePorts . extractTypes [] . varType $ f, varToArg args v) of
+          -- A partially applied binary function, construct a lambda. Note that
+          -- SkePU does not use variable capture, but instead passes it as a
+          -- scalar.
+          ((a1 : a2 : [], out : []), Just arg1) ->
+            let in1 = ExId Input <> Ix 0
+                t1' = exprToCType t1
+                in2 = ExId Input <> Ix 1
+                t2' = exprToCType t2
+                (tmpix', stmts, expr') = resolveBinOp tmpix [] (CIR.EVar in1) (CIR.EVar in2) (getOccString f)
+                expr'' = CIR.ELambda [] [(t1', in1), (t2', in2)] $ CIR.SScope [CIR.SReturn . Just $ expr']
+             in (tmpix', stmts, expr'')
+          _ -> undefined
+  e ->
+    let (tmpix1, stmts1, expr1) = exprToCExpr tmpix outLoc args undefined e
+        inputs = zipWith makeInArgs inputIds args
+        makeInArgs inName inVar = (portToC . makePort . varType $ inVar, inName)
+        expr2 = CIR.ELambda [] inputs $ CIR.SScope [CIR.SReturn $ Just expr1]
+     in (tmpix1, stmts1, expr2)
+      -- error $ show stmts1 <> " " <> show expr2
+
+exprToCExpr :: Int -> OutputLoc -> [Var] -> CType -> CoreExpr -> (Int, [CStatement], CExpression)
+exprToCExpr tmpix outLoc args tout expr = case expr of
+  -- Inner function applied to a function and a var
+  App (App (App (App (Var inner) t1) t2) e1) e2@(Var v)
+    | typeOrConstraint t1 && typeOrConstraint t2 ->
+        case skelToSkePU $ getOccString inner of
+          Just (ret, skel) ->
+            let (tmpix1, stmts1, e1') = exprToLambda tmpix ret args tout e1
+                (tmpix2, outname) = mkTemp tmpix1
+                (tmpix3, skelInstance) = mkTemp tmpix2
+                stmts =
+                  [ CIR.SVarDecl tout outname
+                  , CIR.SVarDef CIR.TAuto skelInstance $ CIR.ECall skel [e1']
+                  , CIR.SExpr $
+                      CIR.ECall skelInstance $
+                        [CIR.EVar outname, CIR.EDereference $ CIR.EVar $ ExId Input <> Ix 0]
+                  ]
+             in (tmpix3, stmts1 <> stmts, CIR.EVar outname)
+          Nothing ->
+              let (tmpix1, stmts1, expr1) = exprToCExpr tmpix FunArg args tout e1
+                  (tmpix2, stmts2, expr2) = exprToCExpr tmpix1 FunArg args tout e2
+               in resolveBinOp tmpix2 (stmts1 <> stmts2) expr1 expr2 $ getOccString inner
+  -- Binary operator/function (with type variables)
+  App (App (App (App (Var f) t1) t2) e1) e2
+    | typeOrConstraint t1 && typeOrConstraint t2 ->
+        let (tmpix1, stmts1, expr1) = exprToCExpr tmpix FunArg args tout e1
+            (tmpix2, stmts2, expr2) = exprToCExpr tmpix1 FunArg args tout e2
+         in resolveBinOp tmpix2 (stmts1 <> stmts2) expr1 expr2 $ getOccString f
+  -- A partially applied binary operator passed as a value. Apply it to the input argument
+  App (App (App (Var f) t1) t2) e
+    | typeOrConstraint t1 && typeOrConstraint t2 ->
+        let (tmpix1, stmts1, e1) = exprToCExpr tmpix FunArg args tout e
+            v1 = CIR.EDereference $ CIR.EVar $ ExId Input <> Ix 0
+         in resolveBinOp tmpix1 stmts1 e1 v1 $ getOccString f
+  Lit (LitNumber _ i) -> (tmpix, [], CIR.EInt $ fromIntegral i)
+  App _ (Lit (LitNumber _ i)) -> (tmpix, [], CIR.EInt $ fromIntegral i)
+  Var v -> case varToArg args v of
+    Just v' -> (tmpix, [], CIR.EDereference v')
+    -- Assume the Var is a function
+    Nothing ->
+      let (inputs, outputs) = extractTypes [] . varType $ v
+          (tmpix1, outname) = mkTemp tmpix
+          outvar = CIR.EVar outname
+          outvarref = CIR.EReference outvar
+       in ( tmpix1
+          ,
+            [ CIR.SVarDecl tout outname
+            , CIR.SExpr $
+                CIR.ECall (Direct v) $
+                  zipWith const inputArgs inputs <> zipWith const [outvarref] outputs
+            ]
+          , outvar
+          )
+  -- Unary operator/function (with type variables)
+  App (App (Var f) t) (Var v) | typeOrConstraint t && (not $ typeOrConstraint $ Var v) ->
     case varToArg args v of
       Just arg ->
-        (counter, [], CIR.ECall (Direct f) [arg])
-      Nothing -> error "Var not in args!"
+        (tmpix, [], CIR.ECall (Direct f) [arg])
+      Nothing -> error $ "Var not in args! " <> showPprUnsafe expr
+  -- Inner function applied to a function. Apply it to the input arguments
+  App (App (Var inner) t) e
+    | typeOrConstraint t && (not $ typeOrConstraint e) ->
+        case skelToSkePU $ getOccString inner of
+          Nothing -> error $ "Unknown skeleton: " <> getOccString inner
+          Just (ret, skel) ->
+            let (tmpix1, stmts1, e1) = exprToLambda tmpix ret args tout e
+                (tmpix2, outname) = mkTemp tmpix1
+                (tmpix3, skelInstance) = mkTemp tmpix2
+                call =
+                  CIR.ECall skelInstance $
+                    case ret of
+                      FunArg -> [CIR.EVar outname, CIR.EDereference $ CIR.EVar $ ExId Input <> Ix 0]
+                      Return -> [CIR.EDereference $ CIR.EVar $ ExId Input <> Ix 0]
+                stmts =
+                  [ CIR.SVarDecl tout outname
+                  , CIR.SVarDef CIR.TAuto skelInstance $ CIR.ECall skel [e1]
+                  ]
+                    <> case ret of
+                      FunArg -> [CIR.SExpr call]
+                      Return -> []
+             in ( tmpix3
+                , stmts1 <> stmts
+                , case ret of
+                    FunArg -> CIR.EVar outname
+                    Return -> call
+                )
   -- A binary operator passed as a value. Apply it to the input arguments
   App (App (Var f) t1) t2
     | typeOrConstraint t1 && typeOrConstraint t2 ->
         let v1 = CIR.EDereference $ CIR.EVar $ ExId Input <> Ix 0
             v2 = CIR.EDereference $ CIR.EVar $ ExId Input <> Ix 1
-         in resolveBinOp counter [] v1 v2 $ getOccString f
-  -- A partially applied binary operator passed as a value. Apply it to the input argument
-  App (App (App (Var f) t1) t2) e
-    | typeOrConstraint t1 && typeOrConstraint t2 ->
-        let (tmpix1, stmts1, e1) = exprToCExpr' counter args e
-            v1 = CIR.EDereference $ CIR.EVar $ ExId Input <> Ix 0
-         in resolveBinOp tmpix1 stmts1 e1 v1 $ getOccString f
-  -- Inner function applied to a function. Apply it to the input arguments
-  App (App (Var inner) t) e
-    | typeOrConstraint t && (not $ typeOrConstraint e) ->
-        let (tmpix1, stmts1, e1) = exprToCExpr' counter args e
-            skel = skelToSkePU $ getOccString inner
-            ty = portToC . makePort $ case t of
-              Type t' -> t'
-              Var v -> varType v
-              _ -> undefined -- should not happen
-            (tmpix2, outname) = mkTemp tmpix1
-            (tmpix3, skelInstance) = mkTemp tmpix2
-            stmts =
-              [ CIR.SVarDecl ty outname
-              , CIR.SVarDef CIR.TAuto skelInstance $ CIR.ECall skel [e1]
-              , CIR.SExpr $
-                  CIR.ECall skelInstance $
-                    [CIR.EVar outname, CIR.EDereference $ CIR.EVar $ ExId Input <> Ix 0]
-              ]
-         in (tmpix3, stmts1 <> stmts, CIR.EVar outname)
-  e -> exprToCExpr' counter args e
+         in resolveBinOp tmpix [] v1 v2 $ getOccString f
+  e -> error . showPprUnsafe $ e
 
 bodyToStatement :: CoreExpr -> CStatement
 bodyToStatement = \case
@@ -310,10 +355,12 @@ bodyToStatement = \case
     | getOccString v == "comb22" ->
         let (args, expr) = collectBinders e
          in case expr of
-              App (App (App (App (Var v') _) _) e1) e2
+              App (App (App (App (Var v') te1) te2) e1) e2
                 | getOccString v' == "(,)" ->
-                    let (cntr, init1, ea1) = exprToCExpr 0 args e1
-                        (_, init2, ea2) = exprToCExpr cntr args e2
+                    let tout1 = exprToCType te1
+                        tout2 = exprToCType te2
+                        (cntr, init1, ea1) = exprToCExpr 0 FunArg args tout1 e1
+                        (_, init2, ea2) = exprToCExpr cntr FunArg args tout2 e2
                      in CIR.SScope $
                           init1
                             <> init2
@@ -323,10 +370,10 @@ bodyToStatement = \case
               e' -> error . showPprUnsafe $ e'
     | otherwise ->
         error $ "5App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
-  App (App (App (App (Var v) _) _) _) e
+  App (App (App (App (Var v) _) _) tout) e
     | getOccString v == "comb21" ->
         let (args, expr) = collectBinders e
-            (_, init1, ea1) = exprToCExpr 0 args expr
+            (_, init1, ea1) = exprToCExpr 0 FunArg args (exprToCType tout) expr
          in CIR.SScope $
               init1
                 <> [ CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 0) ea1
@@ -334,10 +381,10 @@ bodyToStatement = \case
     | getOccString v == "comb12" ->
         let (args, expr) = collectBinders e
          in case expr of
-              App (App (App (App (Var v') _) _) e1) e2
+              App (App (App (App (Var v') tout1) tout2) e1) e2
                 | getOccString v' == "(,)" ->
-                    let (cntr, init1, ea1) = exprToCExpr 0 args e1
-                        (_, init2, ea2) = exprToCExpr cntr args e2
+                    let (cntr, init1, ea1) = exprToCExpr 0 FunArg args (exprToCType tout1) e1
+                        (_, init2, ea2) = exprToCExpr cntr FunArg args (exprToCType tout2) e2
                      in CIR.SScope $
                           init1
                             <> init2
@@ -347,10 +394,10 @@ bodyToStatement = \case
               e' -> error . showPprUnsafe $ e'
     | otherwise ->
         error $ "4App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
-  App (App (App (Var v) _) _) e
+  App (App (App (Var v) _) tout) e
     | getOccString v == "comb11" ->
         let (args, expr) = collectBinders e
-            (_, init1, ea1) = exprToCExpr 0 args expr
+            (_, init1, ea1) = exprToCExpr 0 FunArg args (exprToCType tout) expr
          in CIR.SScope $
               init1
                 <> [ CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 0) $ ea1
@@ -369,7 +416,7 @@ bodyToStatement = \case
   -- Might be a regular function, i.e. not a process
   e@(Lam _ _) ->
     let (args, expr') = collectBinders e
-        (_, stmts, expr) = exprToCExpr 0 args expr'
+        (_, stmts, expr) = exprToCExpr 0 FunArg args undefined expr'
         output = CIR.EDereference . CIR.EVar $ ExId Output <> Ix 0
      in CIR.SScope $
           stmts
