@@ -543,12 +543,40 @@ instance Synthesizable Process where
              in (context : newC, context : allC1)
 
   compose ([], _) = error "Missing main context"
-  compose (mainC, allC) = CIR.Prog $ [stdio] <> forwardDecls <> defs <> map main mainC
+  compose (mainC, allC) = CIR.Prog $ skepu <> [stdio] <> forwardDecls <> defs <> map main mainC
    where
     (forwardDecls, defs) = unzip . map contextToGlobal $ allC
+    skepu = [ CIR.GMacro (ExId $ Name "ifdef") [ExId $ Name "__cplusplus"]
+            , CIR.GMacro (ExId $ Name "include") [ExId $ Name "<skepu>"]
+            , CIR.GMacro (ExId $ Name "include") [ExId $ Name "<skepu-lib/io.hpp>"]
+            , CIR.GMacro (ExId $ Name "endif") []
+            ]
     stdio = CIR.GMacro (ExId $ Name "include") [ExId $ Name "<stdio.h>"]
-    getInput ret (t, v) = CIR.SVarAssign ret (CIR.ECall (ExId $ Name "scanf") [CIR.EString $ typeToFormat t, CIR.EReference $ CIR.EVar v])
-    putOutput (t, v) = CIR.SExpr $ CIR.ECall (ExId $ Name "printf") [CIR.EString $ typeToFormat t <> "\\n", CIR.EVar v]
+    getInput ret (t, v) = case removePoint t of
+      CIR.TConstructor i t' ->
+        [ CIR.SExpr $
+            CIR.ECallExpr (CIR.EMemberAccess (CIR.EVar v) (ExId $ Name "init")) [CIR.EInt 10]
+        ]
+      _ ->
+        [ CIR.SVarAssign
+            ret
+            (CIR.ECall (ExId $ Name "scanf") [CIR.EString $ typeToFormat t, CIR.EReference $ CIR.EVar v])
+        ]
+    putOutput (t, v) = case removePoint t of
+      CIR.TConstructor _ t' ->
+        [ CIR.SStream (ExId $ Name "skepu::io::cout") True $
+          [ CIR.EVar v
+          , CIR.EString "\\n"
+          ]
+        ]
+      _ ->
+        [ CIR.SExpr $
+            CIR.ECall
+              (ExId $ Name "printf")
+              [ CIR.EString $ typeToFormat t <> "\\n"
+              , CIR.EVar v
+              ]
+        ]
     typeToFormat ty = case removePoint ty of
       CIR.TInt -> "%d"
       CIR.TFloat -> "%f"
@@ -568,7 +596,7 @@ instance Synthesizable Process where
                  CIR.SScope $
                    map (\(t, v) -> CIR.SVarDecl (removePoint t) v) (inputs <> outputs)
                      <> [CIR.SVarDecl CIR.TInt statusVar]
-                     <> map (getInput statusVar) inputs
+                     <> (mconcat . map (getInput statusVar)) inputs
                      <> [ CIR.SIf
                             (CIR.EBinOp CIR.Less (CIR.EVar statusVar) (CIR.EInt 1))
                             (CIR.SScope [CIR.SBreak])
@@ -579,7 +607,7 @@ instance Synthesizable Process where
                               map getArg $
                                 inputs <> outputs <> (map (\(t, v, _) -> (t, v)) $ S.elems delayStorage)
                         ]
-                     <> map putOutput outputs
+                     <> (mconcat . map putOutput) outputs
              ]
           <> [CIR.SReturn $ Just $ CIR.EInt $ -1]
     contextToGlobal Context{..} =

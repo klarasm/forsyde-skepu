@@ -153,6 +153,7 @@ data Statement a
   | SReturn (Maybe (Expression a))
   | SGoto (IR.Id a)
   | SLabel (IR.Id a)
+  | SStream (IR.Id a) Bool [Expression a]
   deriving (Eq, Ord, Show)
 
 data Global a
@@ -167,25 +168,42 @@ data Global a
 data Program a = Prog [(Global a)]
   deriving (Eq, Ord, Show)
 
--- testProg = Prog
---   [ GMacro "include" ["<stdio.h>"]
---   , GMacro "define" ["PI", "3.14159265458979323846"]
---   , GStruct "tf"
---     [ (TInt, "a")
---     , (TChar, "b")
---     ]
---   , GFuncDeclare Nothing TInt "foo" [(TInt, "")]
---   , GFuncDef Nothing TInt "main" [(TInt, "argc"), (TPointer (TPointer TChar), "argv")] (SScope
---     [ SVarDecl TInt "test"
---     , SVarDef TAuto "fwef" (ECall "skepu::Map<2>" [])
---     , SVarDef TAuto "fwef" (ECall "skepu::Reduce" [ELambda [] [(TInt, "a"), (TInt, "b")] (SScope [SReturn . Just $ EBinOp Add (EVar "a") (EVar "b")])])
---     , SArrayDecl TChar "s" [(EInt 2), (EInt 3)]
---     , SVarAssign "test" (EInt 1)
---     , SVarAssign "test" $ ECall "foo" [EVar "test"]
---     , SIf (EBinOp Less (EVar "test") (EInt 10)) (SExpr $ EUnOp PostIncrement $ EVar "test") (Just $ SExpr $ EUnOp PostDecrement $ EVar "test")
---     , SIf (EBinOp Less (EVar "test") (EInt 10)) (SScope [SExpr $ EUnOp PostIncrement $ EVar "test"]) (Just $ SScope [SExpr $ EUnOp PostDecrement $ EVar "test"])
---     ])
---   ]
+testProg :: Program String
+testProg =
+  Prog
+    [ GMacro (IR.ExId "include") [IR.ExId "<stdio.h>"]
+    , GMacro (IR.ExId "define") [IR.ExId "PI", IR.ExId "3.14159265458979323846"]
+    , GStruct
+        (IR.ExId "tf")
+        [ (TInt, IR.ExId "a")
+        , (TChar, IR.ExId "b")
+        ]
+    , GFuncDeclare Nothing TInt (IR.ExId "foo") [(TInt, IR.Empty)]
+    , GFuncDef
+        Nothing
+        TInt
+        (IR.ExId "main")
+        [(TInt, IR.ExId "argc"), (TPointer (TPointer TChar), IR.ExId "argv")]
+        ( SScope
+            [ SVarDecl TInt $ IR.ExId "test"
+            , SVarDef TAuto (IR.ExId "fwef") (ECall (IR.ExId "skepu::Map<2>") [])
+            , SVarDef TAuto (IR.ExId "fwef") (ECall (IR.ExId "skepu::Reduce") [ELambda [] [(TInt, IR.ExId "a"), (TInt, IR.ExId "b")] (SScope [SReturn . Just $ EBinOp Add (EVar $ IR.ExId "a") (EVar $ IR.ExId "b")])])
+            , SArrayDecl TChar (IR.ExId "s") [(EInt 2), (EInt 3)]
+            , SVarAssign (IR.ExId "test") (EInt 1)
+            , SVarAssign (IR.ExId "test") $ ECall (IR.ExId "foo") [EVar $ IR.ExId "test"]
+            , SIf (EBinOp Less (EVar $ IR.ExId "test") (EInt 10)) (SExpr $ EUnOp PostIncrement $ EVar $ IR.ExId "test") (Just $ SExpr $ EUnOp PostDecrement $ EVar $ IR.ExId "test")
+            , SIf (EBinOp Less (EVar $ IR.ExId "test") (EInt 10)) (SScope [SExpr $ EUnOp PostIncrement $ EVar $ IR.ExId "test"]) (Just $ SScope [SExpr $ EUnOp PostDecrement $ EVar $ IR.ExId "test"])
+            , SExpr $
+                ECall
+                  (IR.ExId "skepu::external")
+                  [ ELambda [IR.ExId "&"] [] $
+                      SScope
+                        []
+                  ]
+            , SStream (IR.ExId "std::cout") True [EString "Var a is: ", EVar (IR.ExId "a")]
+            ]
+        )
+    ]
 
 -- >>> pretty testProg
 -- #include <stdio.h>
@@ -199,7 +217,7 @@ data Program a = Prog [(Global a)]
 -- {
 --     int test;
 --     auto fwef = skepu::Map<2>();
---     auto fwef = skepu::Reduce([](int a, int b){
+--     auto fwef = skepu::Reduce([](int a, int b) {
 --         return (a + b);
 --     });
 --     char s[2][3];
@@ -214,6 +232,10 @@ data Program a = Prog [(Global a)]
 --     } else {
 --         (test--);
 --     }
+--     skepu::external([&]() {
+--         
+--     });
+--     std::cout << "Var a is: " << a;
 -- }
 
 instance (Pretty a) => Pretty (Type a) where
@@ -312,6 +334,8 @@ instance (Pretty a) => Pretty (Statement a) where
     SReturn Nothing -> pretty "return"
     SGoto l -> pretty "goto" <+> pretty l
     SLabel l -> pretty l <> colon
+    SStream n dir exprs -> pretty n <+> (hsep . map (sepIO dir)) (map pretty exprs)
+      where sepIO d v = (if d then pretty "<<" else pretty ">>") <+> v
 
 nestOrScope :: (Pretty a) => (Statement a) -> Doc ann
 nestOrScope s = case s of
@@ -338,6 +362,7 @@ needsSemi s = case s of
   SReturn _ -> pretty s <> semi
   SGoto _ -> pretty s <> semi
   SLabel _ -> pretty s
+  SStream _ _ _ -> pretty s <> semi
 
 instance (Pretty a) => Pretty (Global a) where
   pretty global = case global of
