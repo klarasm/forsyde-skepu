@@ -264,7 +264,15 @@ skelAppToCExpr tmpix ret args tin tout ntin ntout inports outports skel e =
       (tmpix3, skelInstance) = mkTemp tmpix2
       inputs = map CIR.EDereference . zipWith const inputArgs $ tin
       ini = case tout of
-        CIR.TConstructor _ _ -> Just $ [CIR.ECallExpr (CIR.EPointerAccess (head inputArgs) $ ExId $ Name "size") []]
+        CIR.TConstructor _ _ ->
+          Just
+            [ CIR.ECallExpr
+                ( CIR.EMemberAccess
+                    (derefArg (needDeref 0 (fst . head $ inports, CIR.TVoid)) $ head inputArgs)
+                    (ExId $ Name "size")
+                )
+                []
+            ]
         _ -> Nothing
       call =
         CIR.ECall skelInstance $
