@@ -188,25 +188,30 @@ skelToSkePU = \case
   "farm22" -> Just (FunArg, ExId Map <> (ExId $ Name "<2>"))
   _ -> Nothing
 
-resolveBinOp ::
+resolveOp ::
   Int ->
   [CStatement] ->
-  (CType, CExpression) ->
-  (CType, CExpression) ->
+  [(CType, CExpression)] ->
   CType ->
   String ->
   (Int, [CStatement], (CType, CExpression))
-resolveBinOp tmpix stmts (t1, expr1) (t2, expr2) tout = \case
+resolveOp tmpix stmts [(t1, expr1)] tout = \case
+  "length" -> case t1 of
+    CIR.TConstructor _ _ -> (tmpix, stmts, (tout, CIR.ECallExpr (CIR.EPointerAccess expr1 (ExId $ Name "size")) []))
+    _ -> undefined
+  u -> error $ "Unknown unary function: " <> u
+resolveOp tmpix stmts [(t1, expr1), (t2, expr2)] tout = \case
   "+" -> (tmpix, stmts, (tout, CIR.EBinOp CIR.Add e1 e2))
   "*" -> (tmpix, stmts, (tout, CIR.EBinOp CIR.Multiply e1 e2))
   "-" -> (tmpix, stmts, (tout, CIR.EBinOp CIR.Subtract e1 e2))
   "quot" -> (tmpix, stmts, (tout, CIR.EBinOp CIR.Divide e1 e2))
   "/" -> (tmpix, stmts, (tout, CIR.EBinOp CIR.Divide e1 e2))
   "div" -> error "Haskell `div` rounds to negative infinity, not implemented. Consider using `quot`"
-  u -> error $ "Unknown function: " <> u
+  u -> error $ "Unknown binary function: " <> u
  where
   e1 = derefArg (needDeref 0 (t1, tout)) expr1
   e2 = derefArg (needDeref 0 (t2, tout)) expr2
+resolveOp _ _ _ _ = undefined
 
 -- varToArg :: (Eq a) => [a] -> a -> Maybe CExpression
 varToArg :: [CType] -> [Var] -> Var -> Maybe (CType, CIR.Expression IdExt)
@@ -227,7 +232,7 @@ exprToLambda tmpix outLoc args tin tout inports outports expr = case expr of
                 t1' = exprToCType t1
                 in2 = ExId Input <> Ix 1
                 t2' = exprToCType t2
-                (tmpix', stmts, (_, expr')) = resolveBinOp tmpix [] (t1', CIR.EVar in1) (t2', CIR.EVar in2) tout (getOccString f)
+                (tmpix', stmts, (_, expr')) = resolveOp tmpix [] [(t1', CIR.EVar in1), (t2', CIR.EVar in2)] tout (getOccString f)
                 expr'' = CIR.ELambda [] [(t1', in1), (t2', in2)] $ CIR.SScope [CIR.SReturn . Just $ expr']
              in (tmpix', stmts, (tout, expr''))
           _ -> undefined
@@ -242,7 +247,7 @@ exprToLambda tmpix outLoc args tin tout inports outports expr = case expr of
                 t1' = exprToCType t1
                 in2 = ExId Input <> Ix 1
                 t2' = exprToCType t2
-                (tmpix', stmts, (_, expr')) = resolveBinOp tmpix [] (t1', CIR.EVar in1) (t2', CIR.EVar in2) tout (getOccString f)
+                (tmpix', stmts, (_, expr')) = resolveOp tmpix [] [(t1', CIR.EVar in1), (t2', CIR.EVar in2)] tout (getOccString f)
                 expr'' = CIR.ELambda [] [(t1', in1), (t2', in2)] $ CIR.SScope [CIR.SReturn . Just $ expr']
              in (tmpix', stmts, (tout, expr''))
           _ -> undefined
@@ -275,20 +280,20 @@ exprToCExpr :: Int -> OutputLoc -> [Var] -> [CType] -> CType -> [(CType, Id IdEx
 exprToCExpr tmpix outLoc args tin tout inports outports expr = case expr of
   -- Inner function applied to a function and a var
   App (App (App (App (Var inner) t1) t2) e1) e2@(Var v)
-    | typeOrConstraint t1 && typeOrConstraint t2 ->
+    | typeOrConstraint t1 && typeOrConstraint t2 && (not $ typeOrConstraint e1) && (not $ typeOrConstraint e2) ->
         case skelToSkePU $ getOccString inner of
           Just (ret, skel) ->
             skelAppToCExpr tmpix ret args tin tout [exprToCType t1, exprToCType t2] tout inports outports skel e1
           Nothing ->
             let (tmpix1, stmts1, (t1', expr1)) = exprToCExpr tmpix FunArg args tin (exprToCType t1) inports outports e1
                 (tmpix2, stmts2, (t2', expr2)) = exprToCExpr tmpix1 FunArg args tin (exprToCType t2) inports outports e2
-             in resolveBinOp tmpix2 (stmts1 <> stmts2) (t1', expr1) (t2', expr2) tout $ getOccString inner
+             in resolveOp tmpix2 (stmts1 <> stmts2) [(t1', expr1), (t2', expr2)] tout $ getOccString inner
   -- Binary operator/function (with type variables)
   App (App (App (App (Var f) t1) t2) e1) e2
     | typeOrConstraint t1 && typeOrConstraint t2 && (not $ typeOrConstraint e1) && (not $ typeOrConstraint e2) ->
         let (tmpix1, stmts1, (_, expr1)) = exprToCExpr tmpix FunArg args tin (exprToCType t1) inports outports e1
             (tmpix2, stmts2, (_, expr2)) = exprToCExpr tmpix1 FunArg args tin (exprToCType t2) inports outports e2
-         in resolveBinOp tmpix2 (stmts1 <> stmts2) (exprToCType t1, expr1) (exprToCType t2, expr2) tout $ getOccString f
+         in resolveOp tmpix2 (stmts1 <> stmts2) [(exprToCType t1, expr1), (exprToCType t2, expr2)] tout $ getOccString f
   App (App (App (App (Var f) t1) t2) t3) e1
     | typeOrConstraint t1 && typeOrConstraint t2 && typeOrConstraint t3 && (not $ typeOrConstraint e1) ->
         case skelToSkePU (getOccString f) of
@@ -300,7 +305,7 @@ exprToCExpr tmpix outLoc args tin tout inports outports expr = case expr of
     | typeOrConstraint t1 && typeOrConstraint t2 ->
         let (tmpix1, stmts1, (t1', e1)) = exprToCExpr tmpix FunArg args tin tout inports outports e
             v1 = derefArg (needDeref 0 (fst . head $ inports, exprToCType t1)) $ CIR.EVar $ ExId Input <> Ix 0
-         in resolveBinOp tmpix1 stmts1 (t1', e1) (head tin, v1) tout $ getOccString f
+         in resolveOp tmpix1 stmts1 [(t1', e1), (head tin, v1)] tout $ getOccString f
   -- Inner unary function applied onto an expression and var
   App (App (App (Var inner) t1) e) (Var v)
     | typeOrConstraint t1 && (not $ typeOrConstraint e) ->
@@ -350,7 +355,7 @@ exprToCExpr tmpix outLoc args tin tout inports outports expr = case expr of
     | typeOrConstraint t1 && typeOrConstraint t2 ->
         let v1 = CIR.EDereference $ CIR.EVar $ ExId Input <> Ix 0
             v2 = CIR.EDereference $ CIR.EVar $ ExId Input <> Ix 1
-         in resolveBinOp tmpix [] (head tin, v1) (head . tail $ tin, v2) tout $ getOccString f
+         in resolveOp tmpix [] [(head tin, v1), (head . tail $ tin, v2)] tout $ getOccString f
   -- An integer literal
   App _ (Lit (LitNumber _ i)) -> (tmpix, [], (CIR.TInt, CIR.EInt $ fromIntegral i))
   Lit (LitNumber _ i) -> (tmpix, [], (CIR.TInt, CIR.EInt $ fromIntegral i))
