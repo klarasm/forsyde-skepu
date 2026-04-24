@@ -122,6 +122,7 @@ data Type a
 data Expression a
   = EVar (IR.Id a)
   | EInt Int
+  | EFloat Float
   | EChar Char
   | EString String
   | EBinOp BinaryOperator (Expression a) (Expression a)
@@ -272,6 +273,7 @@ instance (Pretty a) => Pretty (Expression a) where
   pretty = \case
     EVar x -> pretty x
     EInt i -> pretty i
+    EFloat f -> pretty f
     EChar c -> squotes . pretty $ c
     EString s -> dquotes . pretty $ s
     EBinOp op e1 e2 ->

@@ -145,6 +145,10 @@ getDelayExpr = \case
 delayExprToC :: CoreExpr -> CExpression
 delayExprToC = \case
   App (Var _) (Lit (LitNumber _ i)) -> CIR.EInt . fromIntegral $ i
+  App _ (Lit (LitFloat f)) -> CIR.EFloat $ fromRational f
+  Lit (LitFloat f) -> CIR.EFloat $ fromRational f
+  App _ (Lit (LitDouble f)) -> CIR.EFloat $ fromRational f
+  Lit (LitDouble f) -> CIR.EFloat $ fromRational f
   _ -> undefined
 
 inputIds :: [Id IdExt]
@@ -371,6 +375,10 @@ exprToCExpr tmpix outLoc args tin tout inports outports expr = case expr of
   -- An integer literal
   App _ (Lit (LitNumber _ i)) -> (tmpix, [], (CIR.TInt, CIR.EInt $ fromIntegral i))
   Lit (LitNumber _ i) -> (tmpix, [], (CIR.TInt, CIR.EInt $ fromIntegral i))
+  App _ (Lit (LitFloat f)) -> (tmpix, [], (CIR.TInt, CIR.EFloat $ fromRational f))
+  Lit (LitFloat f) -> (tmpix, [], (CIR.TFloat, CIR.EFloat $ fromRational f))
+  App _ (Lit (LitDouble f)) -> (tmpix, [], (CIR.TInt, CIR.EFloat $ fromRational f))
+  Lit (LitDouble f) -> (tmpix, [], (CIR.TFloat, CIR.EFloat $ fromRational f))
   Var v -> case M.lookup (Direct v) args of
     Just (t', v') -> (tmpix, [], (tout, derefArg (needDeref 0 (t', tout)) v'))
     -- Assume the Var is a function
