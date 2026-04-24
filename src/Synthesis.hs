@@ -269,10 +269,9 @@ exprToLambda tmpix outLoc args tin tout inports outports expr = case expr of
      in (tmpix1, stmts1, (tout, expr2))
 
 -- Horrible, should trim arguments
-skelAppToCExpr :: Int -> OutputLoc -> [Var] -> [b] -> CType -> [CType] -> CType -> [(CType, Id IdExt)] -> [(CType, Id IdExt)] -> Id IdExt -> CoreExpr -> (Int, [CStatement], (CType, CExpression))
-skelAppToCExpr tmpix ret args tin tout ntin ntout inports outports skel e =
-  let (tmpix1, stmts1, (_, e1')) = exprToLambda tmpix ret args ntin ntout inports outports e
-      (tmpix2, outname) = mkTemp tmpix1
+skelAppToCExpr :: Int -> OutputLoc -> p1 -> [CStatement] -> [b1] -> CType -> [(CType, b2)] -> p2 -> Id IdExt -> CExpression -> (Int, [CStatement], (CType, CExpression))
+skelAppToCExpr tmpix1 ret args stmts1 tin tout inports outports skel e1' =
+  let (tmpix2, outname) = mkTemp tmpix1
       (tmpix3, skelInstance) = mkTemp tmpix2
       inputs = map CIR.EDereference . zipWith const inputArgs $ tin
       ini = case tout of
@@ -312,7 +311,9 @@ exprToCExpr tmpix outLoc args tin tout inports outports expr = case expr of
     | typeOrConstraint t1 && typeOrConstraint t2 && (not $ typeOrConstraint e1) && (not $ typeOrConstraint e2) ->
         case skelToSkePU $ getOccString inner of
           Just (ret, skel) ->
-            skelAppToCExpr tmpix ret args tin tout [exprToCType t1, exprToCType t2] tout inports outports skel e1
+            let (tmpix1, stmts1, (_, e1')) = exprToLambda tmpix ret args [exprToCType t1, exprToCType t2] tout inports outports e1
+            in
+            skelAppToCExpr tmpix1 ret args stmts1 tin tout inports outports skel e1'
           Nothing ->
             let (tmpix1, stmts1, (t1', expr1)) = exprToCExpr tmpix FunArg args tin (exprToCType t1) inports outports e1
                 (tmpix2, stmts2, (t2', expr2)) = exprToCExpr tmpix1 FunArg args tin (exprToCType t2) inports outports e2
@@ -328,7 +329,9 @@ exprToCExpr tmpix outLoc args tin tout inports outports expr = case expr of
     | typeOrConstraint t1 && typeOrConstraint t2 && typeOrConstraint t3 && (not $ typeOrConstraint e1) ->
         case skelToSkePU (getOccString f) of
           Just (ret, skel) ->
-            skelAppToCExpr tmpix ret args tin tout [exprToCType t1, exprToCType t2] (exprToCType t3) inports outports skel e1
+            let (tmpix1, stmts1, (_, e1')) = exprToLambda tmpix ret args [exprToCType t1, exprToCType t2] (exprToCType t3) inports outports e1
+            in
+            skelAppToCExpr tmpix1 ret args stmts1 tin tout inports outports skel e1'
           -- A little weird
           Nothing ->
             let (tmpix1, stmts1, (t1', expr1)) = exprToCExpr tmpix FunArg args tin (varToCType v1) inports outports e1
@@ -338,7 +341,9 @@ exprToCExpr tmpix outLoc args tin tout inports outports expr = case expr of
     | typeOrConstraint t1 && typeOrConstraint t2 && typeOrConstraint t3 && (not $ typeOrConstraint e1) ->
         case skelToSkePU (getOccString f) of
           Just (ret, skel) ->
-            skelAppToCExpr tmpix ret args tin tout [exprToCType t1, exprToCType t2] (exprToCType t3) inports outports skel e1
+            let (tmpix1, stmts1, (_, e1')) = exprToLambda tmpix ret args [exprToCType t1, exprToCType t2] (exprToCType t3) inports outports e1
+            in
+            skelAppToCExpr tmpix1 ret args stmts1 tin tout inports outports skel e1'
           Nothing -> error . showPprUnsafe $ e1
   -- A partially applied binary operator passed as a value. Apply it to the input argument
   App (App (App (Var f) t1) t2) e
@@ -351,7 +356,9 @@ exprToCExpr tmpix outLoc args tin tout inports outports expr = case expr of
     | typeOrConstraint t1 && (not $ typeOrConstraint e) ->
       case skelToSkePU (getOccString inner) of
         Just (ret, skel) ->
-          skelAppToCExpr tmpix ret args tin tout [varToCType v] (exprToCType t1) inports outports skel e
+            let (tmpix1, stmts1, (_, e1')) = exprToLambda tmpix ret args [varToCType v] (exprToCType t1) inports outports e
+            in
+          skelAppToCExpr tmpix1 ret args stmts1 tin tout  inports outports skel e1'
         Nothing -> undefined
   -- Unary operator/function (with type variables)
   App (App (Var f) t) (Var v) | typeOrConstraint t && (not $ typeOrConstraint $ Var v) ->
@@ -365,7 +372,9 @@ exprToCExpr tmpix outLoc args tin tout inports outports expr = case expr of
         case skelToSkePU $ getOccString inner of
           Nothing -> error $ "Unknown skeleton: " <> getOccString inner
           Just (ret, skel) ->
-            skelAppToCExpr tmpix ret args tin tout tin tout inports outports skel e
+            let (tmpix1, stmts1, (_, e1')) = exprToLambda tmpix ret args tin tout inports outports e
+            in
+            skelAppToCExpr tmpix1 ret args stmts1 tin tout inports outports skel e1'
   -- A binary operator passed as a value. Apply it to the input arguments
   App (App (Var f) t1) t2
     | typeOrConstraint t1 && typeOrConstraint t2 ->
