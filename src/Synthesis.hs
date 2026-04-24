@@ -537,8 +537,8 @@ bodyToStatement inports outports = \case
     | getOccString v == "comb31" -> makeComb inports outports [t1, t2, t3, t4] e
     | otherwise -> error $ "5App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
   App (App (App (App (Var v) t1) t2) t3) e
-    | getOccString v == "comb21" -> makeComb inports outports [t1, t2, t3] e
     | getOccString v == "comb12" -> makeComb inports outports [t1, t2, t3] e
+    | getOccString v == "comb21" -> makeComb inports outports [t1, t2, t3] e
     | otherwise -> error $ "4App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
   App (App (App (Var v) t1) t2) e
     | getOccString v == "comb11" -> makeComb inports outports [t1, t2]  e
