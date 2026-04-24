@@ -449,6 +449,16 @@ bodyToStatement inports outports = \case
                                  ]
                         )
               e' -> error . showPprUnsafe $ e'
+    | getOccString v == "comb31" ->
+        let (args, expr) = collectBinders e
+            argMap = makeMap args inports
+            (_, init1, (_, ea1)) = exprToCExpr 0 FunArg argMap (map exprToCType [t1, t2, t3]) (exprToCType t4) inports outports expr
+         in ( FunArg
+            , CIR.SScope $
+                init1
+                  <> [ CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 0) ea1
+                     ]
+            )
     | otherwise ->
         error $ "5App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
   App (App (App (App (Var v) t1) t2) t3) e
