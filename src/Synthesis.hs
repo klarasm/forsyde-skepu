@@ -489,12 +489,18 @@ makeComb inports outports tys e =
 
 bodyToStatement :: [(CType, Id IdExt)] -> [(CType, Id IdExt)] -> CoreExpr -> (OutputLoc, CStatement)
 bodyToStatement inports outports = \case
-  App (App (App (App (App (App (App (App (App (Var v) _) _) _) _) _) _) _) _) e ->
-    error $ "9App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
-  App (App (App (App (App (App (App (App (Var v) _) _) _) _) _) _) _) e ->
-    error $ "8App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
-  App (App (App (App (App (App (App (Var v) _) _) _) _) _) _) e ->
-    error $ "7App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
+  App (App (App (App (App (App (App (App (App (Var v) t1) t2) t3) t4) t5) t6) t7) t8) e
+    | getOccString v == "comb44" -> makeComb inports outports [t1, t2, t3, t4, t5, t6, t7, t8] e
+    | otherwise -> error $ "9App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
+  App (App (App (App (App (App (App (App (Var v) t1) t2) t3) t4) t5) t6) t7) e
+    | getOccString v == "comb34" -> makeComb inports outports [t1, t2, t3, t4, t5, t6, t7] e
+    | getOccString v == "comb43" -> makeComb inports outports [t1, t2, t3, t4, t5, t6, t7] e
+    | otherwise -> error $ "8App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
+  App (App (App (App (App (App (App (Var v) t1) t2) t3) t4) t5) t6) e
+    | getOccString v == "comb24" -> makeComb inports outports [t1, t2, t3, t4, t5, t6] e
+    | getOccString v == "comb33" -> makeComb inports outports [t1, t2, t3, t4, t5, t6] e
+    | getOccString v == "comb42" -> makeComb inports outports [t1, t2, t3, t4, t5, t6] e
+    | otherwise -> error $ "7App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
   App (App (App (App (App (App (Var v) t1) t2) t3) t4) t5) e
     | getOccString v == "comb14" -> makeComb inports outports [t1, t2, t3, t4, t5] e
     | getOccString v == "comb23" -> makeComb inports outports [t1, t2, t3, t4, t5] e
@@ -505,17 +511,14 @@ bodyToStatement inports outports = \case
     | getOccString v == "comb13" -> makeComb inports outports [t1, t2, t3, t4] e
     | getOccString v == "comb22" -> makeComb inports outports [t1, t2, t3, t4] e
     | getOccString v == "comb31" -> makeComb inports outports [t1, t2, t3, t4] e
-    | otherwise ->
-        error $ "5App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
+    | otherwise -> error $ "5App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
   App (App (App (App (Var v) t1) t2) t3) e
     | getOccString v == "comb21" -> makeComb inports outports [t1, t2, t3] e
     | getOccString v == "comb12" -> makeComb inports outports [t1, t2, t3] e
-    | otherwise ->
-        error $ "4App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
+    | otherwise -> error $ "4App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
   App (App (App (Var v) t1) t2) e
     | getOccString v == "comb11" -> makeComb inports outports [t1, t2]  e
-    | otherwise ->
-        error $ "3App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
+    | otherwise -> error $ "3App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
   App (App (Var v) _) e
     | getOccString v == "delay" ->
         ( FunArg
@@ -523,10 +526,8 @@ bodyToStatement inports outports = \case
             [ CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 0) (CIR.EDereference . CIR.EVar $ ExId Input <> Ix 0)
             ]
         )
-    | otherwise ->
-        error $ "2App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
-  App (Var v) e ->
-    error $ "1App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
+    | otherwise -> error $ "2App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
+  App (Var v) e -> error $ "1App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
   -- Might be a regular function, i.e. not a process
   e@(Lam _ _) ->
     let (args, expr') = collectBinders e
