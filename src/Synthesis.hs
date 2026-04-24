@@ -198,7 +198,7 @@ resolveOp ::
 resolveOp tmpix stmts [(t1, expr1)] tout = \case
   "length" -> case t1 of
     CIR.TConstructor _ _ -> (tmpix, stmts, (tout, CIR.ECallExpr (CIR.EPointerAccess expr1 (ExId $ Name "size")) []))
-    _ -> undefined
+    _ -> error $ show t1
   u -> error $ "Unknown unary function: " <> u
 resolveOp tmpix stmts [(t1, expr1), (t2, expr2)] tout = \case
   "+" -> (tmpix, stmts, (tout, CIR.EBinOp CIR.Add e1 e2))
@@ -213,7 +213,6 @@ resolveOp tmpix stmts [(t1, expr1), (t2, expr2)] tout = \case
   e2 = derefArg (needDeref 0 (t2, tout)) expr2
 resolveOp _ _ _ _ = undefined
 
--- varToArg :: (Eq a) => [a] -> a -> Maybe CExpression
 varToArg :: [CType] -> [Var] -> Var -> Maybe (CType, CIR.Expression IdExt)
 varToArg tin args v =
   toExpr
@@ -294,12 +293,23 @@ exprToCExpr tmpix outLoc args tin tout inports outports expr = case expr of
         let (tmpix1, stmts1, (_, expr1)) = exprToCExpr tmpix FunArg args tin (exprToCType t1) inports outports e1
             (tmpix2, stmts2, (_, expr2)) = exprToCExpr tmpix1 FunArg args tin (exprToCType t2) inports outports e2
          in resolveOp tmpix2 (stmts1 <> stmts2) [(exprToCType t1, expr1), (exprToCType t2, expr2)] tout $ getOccString f
+  -- Inner function applied to a var
+  App (App (App (App (Var f) t1) t2) t3) e1@(Var v1)
+    | typeOrConstraint t1 && typeOrConstraint t2 && typeOrConstraint t3 && (not $ typeOrConstraint e1) ->
+        case skelToSkePU (getOccString f) of
+          Just (ret, skel) ->
+            skelAppToCExpr tmpix ret args tin tout [exprToCType t1, exprToCType t2] (exprToCType t3) inports outports skel e1
+          -- A little weird
+          Nothing ->
+            let (tmpix1, stmts1, (t1', expr1)) = exprToCExpr tmpix FunArg args tin (varToCType v1) inports outports e1
+            in resolveOp tmpix1 stmts1 [(t1', expr1)] tout $ getOccString f
+  -- Inner function applied to an expression
   App (App (App (App (Var f) t1) t2) t3) e1
     | typeOrConstraint t1 && typeOrConstraint t2 && typeOrConstraint t3 && (not $ typeOrConstraint e1) ->
         case skelToSkePU (getOccString f) of
           Just (ret, skel) ->
             skelAppToCExpr tmpix ret args tin tout [exprToCType t1, exprToCType t2] (exprToCType t3) inports outports skel e1
-          Nothing -> undefined
+          Nothing -> error . showPprUnsafe $ e1
   -- A partially applied binary operator passed as a value. Apply it to the input argument
   App (App (App (Var f) t1) t2) e
     | typeOrConstraint t1 && typeOrConstraint t2 ->
