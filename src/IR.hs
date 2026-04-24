@@ -52,7 +52,22 @@ data Id a
   | Nested (Id a) (Id a)
   | Ix Int
   | ExId a
-  deriving (Ord)
+instance (Ord a) => Ord (Id a) where
+  compare Empty Empty = LT
+  compare Empty _ = LT
+  compare (Ix ix1) (Ix ix2) = compare ix1 ix2
+  compare (Ix _) _ = LT
+  compare (Direct b1) (Direct b2) = compare b1 b2
+  compare (Direct _) _ = LT
+  compare (Nested na1 na2) (Nested nb1 nb2) = case compare na1 nb1 of
+    EQ -> compare na2 nb2
+    o -> o
+  compare (Nested _ _) _ = LT
+  compare (ExId e1) (ExId e2) = compare e1 e2
+  compare _ Empty = GT
+  compare _ (Ix _) = GT
+  compare _ (Direct _) = GT
+  compare _ (Nested _ _) = GT
 instance (Eq a) => Eq (Id a) where
   (==) Empty _ = False
   (==) _ Empty = False
