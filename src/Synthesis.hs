@@ -261,9 +261,12 @@ exprToCExpr tmpix outLoc args tin tout inports outports expr = case expr of
                 (tmpix2, outname) = mkTemp tmpix1
                 (tmpix3, skelInstance) = mkTemp tmpix2
                 inputs = map CIR.EDereference . zipWith const inputArgs $ tin
+                ini = case tout of
+                  CIR.TConstructor _ _ -> Just $ [CIR.ECallExpr (CIR.EPointerAccess (head inputArgs) $ ExId $ Name "size") []]
+                  _ -> Nothing
                 stmts =
-                  [ CIR.SVarDecl tout outname
-                  , CIR.SVarDef CIR.TAuto skelInstance $ CIR.ECall skel [e1']
+                  [ CIR.SVarDecl tout outname ini
+                  , CIR.SVarDef CIR.TAuto skelInstance Nothing $ CIR.ECall skel [e1']
                   , CIR.SExpr $
                       CIR.ECall skelInstance $
                         [CIR.EVar outname] <> inputs
@@ -287,9 +290,12 @@ exprToCExpr tmpix outLoc args tin tout inports outports expr = case expr of
                 (tmpix2, outname) = mkTemp tmpix1
                 (tmpix3, skelInstance) = mkTemp tmpix2
                 inputs = map CIR.EDereference . zipWith const inputArgs $ tin
+                ini = case tout of
+                  CIR.TConstructor _ _ -> Just $ [CIR.ECallExpr (CIR.EPointerAccess (head inputArgs) $ ExId $ Name "size") []]
+                  _ -> Nothing
                 stmts =
-                  [ CIR.SVarDecl tout outname
-                  , CIR.SVarDef CIR.TAuto skelInstance $ CIR.ECall skel [e1']
+                  [ CIR.SVarDecl tout outname ini
+                  , CIR.SVarDef CIR.TAuto skelInstance Nothing $ CIR.ECall skel [e1']
                   , CIR.SExpr $
                       CIR.ECall skelInstance $
                         [CIR.EVar outname] <> inputs
@@ -318,14 +324,17 @@ exprToCExpr tmpix outLoc args tin tout inports outports expr = case expr of
                 (tmpix2, outname) = mkTemp tmpix1
                 (tmpix3, skelInstance) = mkTemp tmpix2
                 inputs = map CIR.EDereference . zipWith const inputArgs $ tin
+                ini = case tout of
+                  CIR.TConstructor _ _ -> Just $ [CIR.ECallExpr (CIR.EPointerAccess (head inputArgs) $ ExId $ Name "size") []]
+                  _ -> Nothing
                 call =
                   CIR.ECall skelInstance $
                     case ret of
                       FunArg -> [CIR.EVar outname] <> inputs
                       Return -> [CIR.EDereference $ CIR.EVar $ ExId Input <> Ix 0]
                 stmts =
-                  [ CIR.SVarDecl tout outname
-                  , CIR.SVarDef CIR.TAuto skelInstance $ CIR.ECall skel [e1]
+                  [ CIR.SVarDecl tout outname ini
+                  , CIR.SVarDef CIR.TAuto skelInstance Nothing $ CIR.ECall skel [e1]
                   ]
                     <> case ret of
                       FunArg -> [CIR.SExpr call]
@@ -526,7 +535,7 @@ instance Synthesizable Process where
                 pointers = delaySigs <> inputs <> outputs
                 schedStmts = map (CIR.SExpr . vertexToExpr pointers subsysNew) <$> schedVert
                 locals = filter (\v -> not (elem v pointers)) . map (\(Edge v _ _) -> v) $ edges
-                localDefs = map ((\(t, s) -> CIR.SVarDecl t s) . (\(t, n) -> (removePoint t, n)) . varToCDef) locals
+                localDefs = map ((\(t, s) -> CIR.SVarDecl t s Nothing) . (\(t, n) -> (removePoint t, n)) . varToCDef) locals
                 context =
                   Context
                     { from = binder
@@ -546,17 +555,42 @@ instance Synthesizable Process where
   compose (mainC, allC) = CIR.Prog $ skepu <> [stdio] <> forwardDecls <> defs <> map main mainC
    where
     (forwardDecls, defs) = unzip . map contextToGlobal $ allC
-    skepu = [ CIR.GMacro (ExId $ Name "ifdef") [ExId $ Name "__cplusplus"]
-            , CIR.GMacro (ExId $ Name "include") [ExId $ Name "<skepu>"]
-            , CIR.GMacro (ExId $ Name "include") [ExId $ Name "<skepu-lib/io.hpp>"]
-            , CIR.GMacro (ExId $ Name "endif") []
-            ]
+    skepu =
+      [ CIR.GMacro (ExId $ Name "ifdef") [ExId $ Name "__cplusplus"]
+      , CIR.GMacro (ExId $ Name "include") [ExId $ Name "<skepu>"]
+      , CIR.GMacro (ExId $ Name "include") [ExId $ Name "<skepu-lib/io.hpp>"]
+      , CIR.GMacro (ExId $ Name "endif") []
+      ]
     stdio = CIR.GMacro (ExId $ Name "include") [ExId $ Name "<stdio.h>"]
     getInput ret (t, v) = case removePoint t of
       CIR.TConstructor i t' ->
         [ CIR.SExpr $
-            CIR.ECallExpr (CIR.EMemberAccess (CIR.EVar v) (ExId $ Name "init")) [CIR.EInt 10]
+            CIR.ECall (ExId $ Name "skepu::external") $
+              [ CIR.ELambda [ExId $ Name "&"] [] $
+                  CIR.SScope $
+                    [ CIR.SVarDecl CIR.TSizeT (ExId Tmp <> Ix 0) Nothing
+                    , CIR.SVarDecl t' (ExId Input) Nothing
+                    ]
+                      <> getInput statusVar (CIR.TSizeT, ExId Tmp <> Ix 0)
+                      <> breakInput (CIR.SReturn Nothing)
+                      <> [ CIR.SExpr $
+                             CIR.ECallExpr (CIR.EMemberAccess (CIR.EVar v) (ExId $ Name "init")) [CIR.EVar $ ExId Tmp <> Ix 0]
+                         ]
+                      <> [ CIR.SFor
+                             (CIR.SVarDef CIR.TSizeT (ExId Tmp <> Ix 1) Nothing (CIR.EInt 0))
+                             (CIR.EBinOp CIR.Less (CIR.EVar $ ExId Tmp <> Ix 1) (CIR.EVar $ ExId Tmp <> Ix 0))
+                             (CIR.SExpr $ CIR.EUnOp CIR.PostIncrement (CIR.EVar $ ExId Tmp <> Ix 1))
+                             $ CIR.SScope
+                             $ (getInput statusVar (t', ExId Input))
+                               <> [ CIR.SAssign
+                                      (CIR.ECall v [CIR.EVar (ExId Tmp <> Ix 1)])
+                                      (CIR.EVar $ ExId Input)
+                                  ]
+                         ]
+              , CIR.ECall (ExId $ Name "skepu::write") [CIR.EVar v]
+              ]
         ]
+          <> breakInput CIR.SBreak
       _ ->
         [ CIR.SVarAssign
             ret
@@ -565,9 +599,9 @@ instance Synthesizable Process where
     putOutput (t, v) = case removePoint t of
       CIR.TConstructor _ t' ->
         [ CIR.SStream (ExId $ Name "skepu::io::cout") True $
-          [ CIR.EVar v
-          , CIR.EString "\\n"
-          ]
+            [ CIR.EVar v
+            , CIR.EString "\\n"
+            ]
         ]
       _ ->
         [ CIR.SExpr $
@@ -581,9 +615,16 @@ instance Synthesizable Process where
       CIR.TInt -> "%d"
       CIR.TFloat -> "%f"
       CIR.TChar -> "%c"
+      CIR.TSizeT -> "%zu"
       t -> error $ "unknown format string for " <> show t
     getArg (_, v) = CIR.EReference $ CIR.EVar v
     statusVar = ExId $ Name "status"
+    breakInput stmt =
+      [ CIR.SIf
+          (CIR.EBinOp CIR.Less (CIR.EVar statusVar) (CIR.EInt 1))
+          (CIR.SScope [stmt])
+          Nothing
+      ]
     main Context{..} =
       CIR.GFuncDef
         Nothing
@@ -591,17 +632,13 @@ instance Synthesizable Process where
         (ExId $ Name "main")
         [(CIR.TInt, ExId $ Name "argc"), (CIR.TPointer . CIR.TPointer $ CIR.TChar, ExId $ Name "argv")]
         $ CIR.SScope
-        $ map (\(t, v, e) -> CIR.SVarDef (removePoint t) v e) (S.elems delayStorage)
+        $ map (\(t, v, e) -> CIR.SVarDef (removePoint t) v Nothing e) (S.elems delayStorage)
           <> [ CIR.SWhile (CIR.EInt 1) $
                  CIR.SScope $
-                   map (\(t, v) -> CIR.SVarDecl (removePoint t) v) (inputs <> outputs)
-                     <> [CIR.SVarDecl CIR.TInt statusVar]
+                   map (\(t, v) -> CIR.SVarDecl (removePoint t) v Nothing) (inputs <> outputs)
+                     <> [CIR.SVarDef CIR.TInt statusVar Nothing (CIR.EInt 1)]
                      <> (mconcat . map (getInput statusVar)) inputs
-                     <> [ CIR.SIf
-                            (CIR.EBinOp CIR.Less (CIR.EVar statusVar) (CIR.EInt 1))
-                            (CIR.SScope [CIR.SBreak])
-                            Nothing
-                        ]
+                     <> breakInput CIR.SBreak
                      <> [ CIR.SExpr $
                             CIR.ECall (const IEmpty <$> from) $
                               map getArg $

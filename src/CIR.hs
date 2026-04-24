@@ -107,6 +107,7 @@ instance Show BinaryOperator where
 data Type a
   = TVoid
   | TInt
+  | TSizeT
   | TFloat
   | TChar
   | TIdent (IR.Id a)
@@ -139,8 +140,8 @@ data Expression a
 
 data Statement a
   = SExpr (Expression a)
-  | SVarDecl (Type a) (IR.Id a)
-  | SVarDef (Type a) (IR.Id a) (Expression a)
+  | SVarDecl (Type a) (IR.Id a) (Maybe [Expression a])
+  | SVarDef (Type a) (IR.Id a) (Maybe [Expression a]) (Expression a)
   | SAssign (Expression a) (Expression a)
   | SVarAssign (IR.Id a) (Expression a)
   | SArrayDecl (Type a) (IR.Id a) [(Expression a)]
@@ -185,9 +186,11 @@ testProg =
         (IR.ExId "main")
         [(TInt, IR.ExId "argc"), (TPointer (TPointer TChar), IR.ExId "argv")]
         ( SScope
-            [ SVarDecl TInt $ IR.ExId "test"
-            , SVarDef TAuto (IR.ExId "fwef") (ECall (IR.ExId "skepu::Map<2>") [])
-            , SVarDef TAuto (IR.ExId "fwef") (ECall (IR.ExId "skepu::Reduce") [ELambda [] [(TInt, IR.ExId "a"), (TInt, IR.ExId "b")] (SScope [SReturn . Just $ EBinOp Add (EVar $ IR.ExId "a") (EVar $ IR.ExId "b")])])
+            [ SVarDecl TInt (IR.ExId "test") Nothing
+            , SVarDecl (TConstructor (TIdent $ IR.ExId "skepu::Vector") TInt) (IR.ExId "vec") $ Just [EInt 10]
+            , SVarDecl (TConstructor (TIdent $ IR.ExId "skepu::Matrix") TInt) (IR.ExId "mat") $ Just [EInt 10, EInt 10]
+            , SVarDef TAuto (IR.ExId "fwef") Nothing (ECall (IR.ExId "skepu::Map<2>") [])
+            , SVarDef TAuto (IR.ExId "fwef") Nothing (ECall (IR.ExId "skepu::Reduce") [ELambda [] [(TInt, IR.ExId "a"), (TInt, IR.ExId "b")] (SScope [SReturn . Just $ EBinOp Add (EVar $ IR.ExId "a") (EVar $ IR.ExId "b")])])
             , SArrayDecl TChar (IR.ExId "s") [(EInt 2), (EInt 3)]
             , SVarAssign (IR.ExId "test") (EInt 1)
             , SVarAssign (IR.ExId "test") $ ECall (IR.ExId "foo") [EVar $ IR.ExId "test"]
@@ -216,6 +219,8 @@ testProg =
 -- int main (int argc, char **argv)
 -- {
 --     int test;
+--     skepu::Vector<int> vec(10);
+--     skepu::Matrix<int> mat(10, 10);
 --     auto fwef = skepu::Map<2>();
 --     auto fwef = skepu::Reduce([](int a, int b) {
 --         return (a + b);
@@ -233,7 +238,7 @@ testProg =
 --         (test--);
 --     }
 --     skepu::external([&]() {
---         
+--
 --     });
 --     std::cout << "Var a is: " << a;
 -- }
@@ -242,6 +247,7 @@ instance (Pretty a) => Pretty (Type a) where
   pretty = \case
     TVoid -> pretty "void"
     TInt -> pretty "int"
+    TSizeT -> pretty "size_t"
     TFloat -> pretty "float"
     TChar -> pretty "char"
     TIdent s -> pretty s
@@ -294,14 +300,29 @@ instance (Pretty a) => Pretty (Expression a) where
 instance (Pretty a) => Pretty (Statement a) where
   pretty = \case
     SExpr e -> pretty e
-    SVarDecl t@(TPointer _) n ->
+    SVarDecl t@(TPointer _) n Nothing ->
       pretty t <> pretty n
-    SVarDecl t n ->
+    SVarDecl t@(TPointer _) n (Just ini) ->
+      pretty t <> pretty n <> parens (hsep . punctuate comma . map pretty $ ini)
+    SVarDecl t n (Just ini) ->
+      pretty t <+> pretty n <> parens (hsep . punctuate comma . map pretty $ ini)
+    SVarDecl t n Nothing ->
       pretty t <+> pretty n
-    SVarDef t@(TPointer _) n e ->
+    SVarDef t@(TPointer _) n Nothing e ->
       pretty t <> pretty n <+> pretty "=" <+> pretty e
-    SVarDef t n e ->
+    SVarDef t@(TPointer _) n (Just ini) e ->
+      pretty t
+        <> pretty n
+        <> parens (hsep . punctuate comma . map pretty $ ini)
+          <+> pretty "="
+          <+> pretty e
+    SVarDef t n Nothing e ->
       pretty t <+> pretty n <+> pretty "=" <+> pretty e
+    SVarDef t n (Just ini) e ->
+      pretty t <+> pretty n
+        <> parens (hsep . punctuate comma . map pretty $ ini)
+          <+> pretty "="
+          <+> pretty e
     SAssign e1 e2 ->
       pretty e1 <+> pretty "=" <+> pretty e2
     SVarAssign n e ->
@@ -328,14 +349,15 @@ instance (Pretty a) => Pretty (Statement a) where
     SFor initS expr updS bodyS ->
       pretty "for"
         <+> parens (pretty initS <> semi <+> pretty expr <> semi <+> pretty updS)
-        <+> nestOrScope bodyS
+        <> nestOrScope bodyS
     SBreak -> pretty "break"
     SReturn (Just e) -> pretty "return" <+> pretty e
     SReturn Nothing -> pretty "return"
     SGoto l -> pretty "goto" <+> pretty l
     SLabel l -> pretty l <> colon
     SStream n dir exprs -> pretty n <+> (hsep . map (sepIO dir)) (map pretty exprs)
-      where sepIO d v = (if d then pretty "<<" else pretty ">>") <+> v
+     where
+      sepIO d v = (if d then pretty "<<" else pretty ">>") <+> v
 
 nestOrScope :: (Pretty a) => (Statement a) -> Doc ann
 nestOrScope s = case s of
@@ -348,8 +370,8 @@ nestOrScope' s = case s of
 needsSemi :: (Pretty a) => (Statement a) -> Doc ann
 needsSemi s = case s of
   SExpr _ -> pretty s <> semi
-  SVarDecl _ _ -> pretty s <> semi
-  SVarDef _ _ _ -> pretty s <> semi
+  SVarDecl _ _ _ -> pretty s <> semi
+  SVarDef _ _ _ _ -> pretty s <> semi
   SAssign _ _ -> pretty s <> semi
   SVarAssign _ _ -> pretty s <> semi
   SArrayDecl _ _ _ -> pretty s <> semi
