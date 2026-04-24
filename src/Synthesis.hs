@@ -213,7 +213,7 @@ resolveOp tmpix stmts [(t1, expr1), (t2, expr2)] tout = \case
   e2 = derefArg (needDeref 0 (t2, tout)) expr2
 resolveOp _ _ _ _ = undefined
 
-varToArg :: [CType] -> [Var] -> Var -> Maybe (CType, CIR.Expression IdExt)
+varToArg :: [CType] -> [Var] -> Var -> Maybe (CType, CExpression)
 varToArg tin args v =
   toExpr
     <$> find (\(_, v', _) -> v' == v) (zip3 [0 ..] args tin)
@@ -257,7 +257,7 @@ exprToLambda tmpix outLoc args tin tout inports outports expr = case expr of
      in (tmpix1, stmts1, (tout, expr2))
 
 -- Horrible, should trim arguments
-skelAppToCExpr :: Int -> OutputLoc -> [Var] -> [b] -> CIR.Type IdExt -> [CType] -> CType -> [(CType, Id IdExt)] -> [(CType, Id IdExt)] -> Id IdExt -> CoreExpr -> (Int, [CStatement], (CIR.Type IdExt, CIR.Expression IdExt))
+skelAppToCExpr :: Int -> OutputLoc -> [Var] -> [b] -> CType -> [CType] -> CType -> [(CType, Id IdExt)] -> [(CType, Id IdExt)] -> Id IdExt -> CoreExpr -> (Int, [CStatement], (CType, CExpression))
 skelAppToCExpr tmpix ret args tin tout ntin ntout inports outports skel e =
   let (tmpix1, stmts1, (_, e1')) = exprToLambda tmpix ret args ntin ntout inports outports e
       (tmpix2, outname) = mkTemp tmpix1
