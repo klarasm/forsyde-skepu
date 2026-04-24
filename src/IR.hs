@@ -28,7 +28,6 @@ module IR (
 )
 where
 
-import Control.Monad
 import Data.List (sort)
 import Data.Maybe (mapMaybe)
 import qualified Data.Set as S
@@ -190,6 +189,7 @@ data Vertex = Vertex
   , process :: Either (Id ()) Process
   , inputs :: [Var]
   , outputs :: [Var]
+  , delay :: Bool
   }
 instance Show Vertex where
   show = show . pretty
@@ -607,16 +607,21 @@ makeVertex parent procs ix = \case
         , process = Left (Direct bind)
         , inputs
         , outputs
+        , delay = case filter isDelayProcess . procsFromId (Direct bind) $ procs of
+          [] -> False
+          _ -> True
         }
   -- An application of an inline process definition
   (expr, inputs, outputs) -> do
-    process <- liftM Right $ makeProcess parent procs (Left (ix, expr, inputs, outputs))
+    proc <- makeProcess parent procs (Left (ix, expr, inputs, outputs))
+    let process = Right proc
     pure $
       Vertex
         { id = ix
         , process
         , inputs
         , outputs
+        , delay = isDelayProcess proc
         }
 
 makeEdge :: [Vertex] -> CoreBndr -> [Edge]

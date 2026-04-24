@@ -146,9 +146,7 @@ delayExprToC :: CoreExpr -> CExpression
 delayExprToC = \case
   App (Var _) (Lit (LitNumber _ i)) -> CIR.EInt . fromIntegral $ i
   App _ (Lit (LitFloat f)) -> CIR.EFloat $ fromRational f
-  Lit (LitFloat f) -> CIR.EFloat $ fromRational f
   App _ (Lit (LitDouble f)) -> CIR.EFloat $ fromRational f
-  Lit (LitDouble f) -> CIR.EFloat $ fromRational f
   _ -> undefined
 
 inputIds :: [Id IdExt]
@@ -160,10 +158,10 @@ outputIds = map ((ExId Output <>) . Ix) [0 ..]
 outputArgs :: [CExpression]
 outputArgs = map CIR.EVar outputIds
 
-vertexToExpr :: (Foldable t) => t Var -> [Context a] -> Vertex -> CExpression
+vertexToExpr :: (Foldable t) => t (Id IdExt) -> [Context a] -> Vertex -> CExpression
 vertexToExpr pointers context Vertex{id = _, ..} = case process of
   Right _ -> undefined
-  Left v -> CIR.ECall (const IEmpty <$> v) $ map ioToExpr inputs <> map ioToExpr outputs <> (delayParams v)
+  Left v -> CIR.ECall (const IEmpty <$> v) $ map ioToExpr (map Direct inputs) <> map ioToExpr (map Direct outputs) <> delayDirect <> (delayParams v)
  where
   delayParams v =
     S.elems
@@ -172,10 +170,13 @@ vertexToExpr pointers context Vertex{id = _, ..} = case process of
       . map (\Context{delayStorage} -> delayStorage)
       . filter (\Context{from} -> v == from)
       $ context
+  delayDirect = if delay
+    then [CIR.EVar $ (Direct . head $ outputs) <> ExId Tmp]
+    else []
   ioToExpr io =
     if elem io pointers
-      then CIR.EVar $ Direct io
-      else CIR.EReference . CIR.EVar $ Direct io
+      then CIR.EVar io
+      else CIR.EReference . CIR.EVar $ io
 
 mkTemp :: Int -> (Int, Id IdExt)
 mkTemp ix = (ix + 1, ExId Tmp <> Ix ix)
@@ -547,7 +548,8 @@ bodyToStatement inports outports = \case
     | getOccString v == "delay" ->
         ( FunArg
         , CIR.SScope
-            [ CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 0) (CIR.EDereference . CIR.EVar $ ExId Input <> Ix 0)
+            [ CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 0) (CIR.EDereference . CIR.EVar $ ExId Tmp <> Ix 0)
+            , CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Tmp <> Ix 0) (CIR.EDereference . CIR.EVar $ ExId Input <> Ix 0)
             ]
         )
     | otherwise -> error $ "2App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
@@ -578,7 +580,17 @@ instance Synthesizable Process where
           Nothing ->
             let inputs = zip (map portToC inports) inputIds
                 outputs = zip (map portToC outports) outputIds
-                (retLoc, body') = bodyToStatement inputs outputs body
+                (retLoc, body') = case delay of
+                  Just b -> (FunArg, b)
+                  Nothing -> bodyToStatement inputs outputs body
+                delay = case body of
+                  App (App (Var v) _) _
+                    | isDelayVar v -> Just $
+                        CIR.SScope
+                            [ CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 0) (CIR.EDereference . CIR.EVar $ ExId Tmp)
+                            , CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Tmp) (CIR.EDereference . CIR.EVar $ ExId Input <> Ix 0)
+                            ]
+                  _ -> Nothing
                 context =
                   Context
                     { from = binder
@@ -587,7 +599,11 @@ instance Synthesizable Process where
                         Return -> fst . head $ outputs
                     , inputs
                     , outputs = case retLoc of
-                        FunArg -> outputs
+                        FunArg ->
+                          outputs
+                          <> case delay of
+                            Just _ -> [(fst . head $ outputs, ExId Tmp)]
+                            Nothing -> []
                         Return -> mempty
                     , delayStorage = mempty
                     , body = body'
@@ -613,14 +629,16 @@ instance Synthesizable Process where
                       )
                     $ delays
                 delayTypes = map varToCDef delaySigs
-                delayDefs = delayExprs >>= \_c -> Just $ ((\(a, b) c -> (a, b, c)) <$> delayTypes) <*> _c
+                delayDefs = delayExprs >>= \_c -> Just $ ((\(t, v) e -> (t, v <> ExId Tmp, e)) <$> delayTypes) <*> _c
                 subsysStorage = mconcat . map (\Context{delayStorage} -> delayStorage) $ subsysNew
                 findVert vid = find (\Vertex{id = i} -> i == vid) vertices
                 schedVert = mapMaybe findVert <$> schedule
-                pointers = delaySigs <> inputs <> outputs
+                delaySigs' = map (\b -> Direct b <> ExId Tmp) delaySigs
+                pointers = delaySigs' <> map Direct inputs <> map Direct outputs
                 schedStmts = map (CIR.SExpr . vertexToExpr pointers subsysNew) <$> schedVert
-                locals = S.filter (\v -> not (elem v pointers)) . S.fromList . map (\(Edge v _ _) -> v) $ edges
+                locals = S.filter (\v -> not (elem (Direct v) (pointers <> map Direct delaySigs))) . S.fromList . map (\(Edge v _ _) -> v) $ edges
                 localDefs = S.map ((\(t, s) -> CIR.SVarDecl t s Nothing) . (\(t, n) -> (removePoint t, n)) . varToCDef) locals
+                delayTmps = map (\(t, i) -> CIR.SVarDef (removePoint t) i Nothing (CIR.EDereference . CIR.EVar $ i <> ExId Tmp)) delayTypes
                 context =
                   Context
                     { from = binder
@@ -631,7 +649,7 @@ instance Synthesizable Process where
                         Just d -> S.fromList d <> subsysStorage
                         Nothing -> error "delay mismatch"
                     , body = CIR.SScope $ case schedStmts of
-                        Just s -> S.elems localDefs <> s
+                        Just s -> S.elems localDefs <> delayTmps <> s
                         Nothing -> error "invalid schedule"
                     }
              in (context : newC, context : allC1)
