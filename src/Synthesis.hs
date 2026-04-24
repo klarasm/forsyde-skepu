@@ -121,16 +121,18 @@ typeToCType = \case
   TyConApp v a -> error $ "TyConApp: " <> (getOccString . tyConName) v <> " " <> showPprUnsafe a
   t -> error $ "Something else: " <> showPprUnsafe t
 
+varToCType :: Var -> CType
+varToCType = portToC . makePort . varType
+
 exprToCType :: CoreExpr -> CType
 exprToCType = \case
   Type t -> portToC . makePort $ t
-  Var v -> portToC . makePort . varType $ v
+  Var v -> varToCType v
   _ -> error "Not a type!"
 
 varToCDef :: Var -> (CType, Id IdExt)
 varToCDef v =
-  let port = makePort . varType $ v
-      ty = portToC port
+  let ty = varToCType v
       name = Direct v
    in (ty, name)
 
@@ -250,6 +252,25 @@ exprToLambda tmpix outLoc args tin tout inports outports expr = case expr of
         expr2 = CIR.ELambda [] inputs $ CIR.SScope [CIR.SReturn $ Just expr1]
      in (tmpix1, stmts1, (tout, expr2))
 
+-- Horrible, should trim arguments
+skelAppToCExpr :: Int -> OutputLoc -> [Var] -> [b] -> CIR.Type IdExt -> [CType] -> CType -> [(CType, Id IdExt)] -> [(CType, Id IdExt)] -> Id IdExt -> CoreExpr -> (Int, [CStatement], (CIR.Type IdExt, CIR.Expression IdExt))
+skelAppToCExpr tmpix ret args tin tout ntin ntout inports outports skel e =
+  let (tmpix1, stmts1, (_, e1')) = exprToLambda tmpix ret args ntin ntout inports outports e
+      (tmpix2, outname) = mkTemp tmpix1
+      (tmpix3, skelInstance) = mkTemp tmpix2
+      inputs = map CIR.EDereference . zipWith const inputArgs $ tin
+      ini = case tout of
+        CIR.TConstructor _ _ -> Just $ [CIR.ECallExpr (CIR.EPointerAccess (head inputArgs) $ ExId $ Name "size") []]
+        _ -> Nothing
+      stmts =
+        [ CIR.SVarDecl tout outname ini
+        , CIR.SVarDef CIR.TAuto skelInstance Nothing $ CIR.ECall skel [e1']
+        , CIR.SExpr $
+            CIR.ECall skelInstance $
+              [CIR.EVar outname] <> inputs
+        ]
+   in (tmpix3, stmts1 <> stmts, (tout, CIR.EVar outname))
+
 exprToCExpr :: Int -> OutputLoc -> [Var] -> [CType] -> CType -> [(CType, Id IdExt)] -> [(CType, Id IdExt)] -> CoreExpr -> (Int, [CStatement], (CType, CExpression))
 exprToCExpr tmpix outLoc args tin tout inports outports expr = case expr of
   -- Inner function applied to a function and a var
@@ -257,21 +278,7 @@ exprToCExpr tmpix outLoc args tin tout inports outports expr = case expr of
     | typeOrConstraint t1 && typeOrConstraint t2 ->
         case skelToSkePU $ getOccString inner of
           Just (ret, skel) ->
-            let (tmpix1, stmts1, (_, e1')) = exprToLambda tmpix ret args [exprToCType t1, exprToCType t2] tout inports outports e1
-                (tmpix2, outname) = mkTemp tmpix1
-                (tmpix3, skelInstance) = mkTemp tmpix2
-                inputs = map CIR.EDereference . zipWith const inputArgs $ tin
-                ini = case tout of
-                  CIR.TConstructor _ _ -> Just $ [CIR.ECallExpr (CIR.EPointerAccess (head inputArgs) $ ExId $ Name "size") []]
-                  _ -> Nothing
-                stmts =
-                  [ CIR.SVarDecl tout outname ini
-                  , CIR.SVarDef CIR.TAuto skelInstance Nothing $ CIR.ECall skel [e1']
-                  , CIR.SExpr $
-                      CIR.ECall skelInstance $
-                        [CIR.EVar outname] <> inputs
-                  ]
-             in (tmpix3, stmts1 <> stmts, (tout, CIR.EVar outname))
+            skelAppToCExpr tmpix ret args tin tout [exprToCType t1, exprToCType t2] tout inports outports skel e1
           Nothing ->
             let (tmpix1, stmts1, (t1', expr1)) = exprToCExpr tmpix FunArg args tin (exprToCType t1) inports outports e1
                 (tmpix2, stmts2, (t2', expr2)) = exprToCExpr tmpix1 FunArg args tin (exprToCType t2) inports outports e2
@@ -286,21 +293,7 @@ exprToCExpr tmpix outLoc args tin tout inports outports expr = case expr of
     | typeOrConstraint t1 && typeOrConstraint t2 && typeOrConstraint t3 && (not $ typeOrConstraint e1) ->
         case skelToSkePU (getOccString f) of
           Just (ret, skel) ->
-            let (tmpix1, stmts1, (_, e1')) = exprToLambda tmpix ret args (map exprToCType [t1, t2]) (exprToCType t3) inports outports e1
-                (tmpix2, outname) = mkTemp tmpix1
-                (tmpix3, skelInstance) = mkTemp tmpix2
-                inputs = map CIR.EDereference . zipWith const inputArgs $ tin
-                ini = case tout of
-                  CIR.TConstructor _ _ -> Just $ [CIR.ECallExpr (CIR.EPointerAccess (head inputArgs) $ ExId $ Name "size") []]
-                  _ -> Nothing
-                stmts =
-                  [ CIR.SVarDecl tout outname ini
-                  , CIR.SVarDef CIR.TAuto skelInstance Nothing $ CIR.ECall skel [e1']
-                  , CIR.SExpr $
-                      CIR.ECall skelInstance $
-                        [CIR.EVar outname] <> inputs
-                  ]
-             in (tmpix3, stmts1 <> stmts, (tout, CIR.EVar outname))
+            skelAppToCExpr tmpix ret args tin tout [exprToCType t1, exprToCType t2] (exprToCType t3) inports outports skel e1
           Nothing -> undefined
   -- A partially applied binary operator passed as a value. Apply it to the input argument
   App (App (App (Var f) t1) t2) e
@@ -308,6 +301,13 @@ exprToCExpr tmpix outLoc args tin tout inports outports expr = case expr of
         let (tmpix1, stmts1, (t1', e1)) = exprToCExpr tmpix FunArg args tin tout inports outports e
             v1 = derefArg (needDeref 0 (fst . head $ inports, exprToCType t1)) $ CIR.EVar $ ExId Input <> Ix 0
          in resolveBinOp tmpix1 stmts1 (t1', e1) (head tin, v1) tout $ getOccString f
+  -- Inner unary function applied onto an expression and var
+  App (App (App (Var inner) t1) e) (Var v)
+    | typeOrConstraint t1 && (not $ typeOrConstraint e) ->
+      case skelToSkePU (getOccString inner) of
+        Just (ret, skel) ->
+          skelAppToCExpr tmpix ret args tin tout [varToCType v] (exprToCType t1) inports outports skel e
+        Nothing -> undefined
   -- Unary operator/function (with type variables)
   App (App (Var f) t) (Var v) | typeOrConstraint t && (not $ typeOrConstraint $ Var v) ->
     case varToArg tin args v of
