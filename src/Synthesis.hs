@@ -184,8 +184,20 @@ skelToSkePU = \case
   "reduce" -> Just (Return, ExId Reduce)
   "farm11" -> Just (FunArg, ExId Map <> (ExId $ Name "<1>"))
   "farm12" -> Just (FunArg, ExId Map <> (ExId $ Name "<1>"))
+  "farm13" -> Just (FunArg, ExId Map <> (ExId $ Name "<1>"))
+  "farm14" -> Just (FunArg, ExId Map <> (ExId $ Name "<1>"))
   "farm21" -> Just (FunArg, ExId Map <> (ExId $ Name "<2>"))
   "farm22" -> Just (FunArg, ExId Map <> (ExId $ Name "<2>"))
+  "farm23" -> Just (FunArg, ExId Map <> (ExId $ Name "<2>"))
+  "farm24" -> Just (FunArg, ExId Map <> (ExId $ Name "<2>"))
+  "farm31" -> Just (FunArg, ExId Map <> (ExId $ Name "<3>"))
+  "farm32" -> Just (FunArg, ExId Map <> (ExId $ Name "<3>"))
+  "farm33" -> Just (FunArg, ExId Map <> (ExId $ Name "<3>"))
+  "farm34" -> Just (FunArg, ExId Map <> (ExId $ Name "<3>"))
+  "farm41" -> Just (FunArg, ExId Map <> (ExId $ Name "<4>"))
+  "farm42" -> Just (FunArg, ExId Map <> (ExId $ Name "<4>"))
+  "farm43" -> Just (FunArg, ExId Map <> (ExId $ Name "<4>"))
+  "farm44" -> Just (FunArg, ExId Map <> (ExId $ Name "<4>"))
   _ -> Nothing
 
 resolveOp ::
