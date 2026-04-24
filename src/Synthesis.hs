@@ -266,14 +266,24 @@ skelAppToCExpr tmpix ret args tin tout ntin ntout inports outports skel e =
       ini = case tout of
         CIR.TConstructor _ _ -> Just $ [CIR.ECallExpr (CIR.EPointerAccess (head inputArgs) $ ExId $ Name "size") []]
         _ -> Nothing
+      call =
+        CIR.ECall skelInstance $
+          case ret of
+            FunArg -> [CIR.EVar outname] <> inputs
+            Return -> [CIR.EDereference $ CIR.EVar $ ExId Input <> Ix 0]
       stmts =
         [ CIR.SVarDecl tout outname ini
         , CIR.SVarDef CIR.TAuto skelInstance Nothing $ CIR.ECall skel [e1']
-        , CIR.SExpr $
-            CIR.ECall skelInstance $
-              [CIR.EVar outname] <> inputs
         ]
-   in (tmpix3, stmts1 <> stmts, (tout, CIR.EVar outname))
+          <> case ret of
+            FunArg -> [CIR.SExpr call]
+            Return -> []
+   in ( tmpix3
+      , stmts1 <> stmts
+      , case ret of
+          FunArg -> (tout, CIR.EVar outname)
+          Return -> (tout, call)
+      )
 
 exprToCExpr :: Int -> OutputLoc -> [Var] -> [CType] -> CType -> [(CType, Id IdExt)] -> [(CType, Id IdExt)] -> CoreExpr -> (Int, [CStatement], (CType, CExpression))
 exprToCExpr tmpix outLoc args tin tout inports outports expr = case expr of
@@ -335,31 +345,7 @@ exprToCExpr tmpix outLoc args tin tout inports outports expr = case expr of
         case skelToSkePU $ getOccString inner of
           Nothing -> error $ "Unknown skeleton: " <> getOccString inner
           Just (ret, skel) ->
-            let (tmpix1, stmts1, (_, e1)) = exprToLambda tmpix ret args tin tout inports outports e
-                (tmpix2, outname) = mkTemp tmpix1
-                (tmpix3, skelInstance) = mkTemp tmpix2
-                inputs = map CIR.EDereference . zipWith const inputArgs $ tin
-                ini = case tout of
-                  CIR.TConstructor _ _ -> Just $ [CIR.ECallExpr (CIR.EPointerAccess (head inputArgs) $ ExId $ Name "size") []]
-                  _ -> Nothing
-                call =
-                  CIR.ECall skelInstance $
-                    case ret of
-                      FunArg -> [CIR.EVar outname] <> inputs
-                      Return -> [CIR.EDereference $ CIR.EVar $ ExId Input <> Ix 0]
-                stmts =
-                  [ CIR.SVarDecl tout outname ini
-                  , CIR.SVarDef CIR.TAuto skelInstance Nothing $ CIR.ECall skel [e1]
-                  ]
-                    <> case ret of
-                      FunArg -> [CIR.SExpr call]
-                      Return -> []
-             in ( tmpix3
-                , stmts1 <> stmts
-                , case ret of
-                    FunArg -> (tout, CIR.EVar outname)
-                    Return -> (tout, call)
-                )
+            skelAppToCExpr tmpix ret args tin tout tin tout inports outports skel e
   -- A binary operator passed as a value. Apply it to the input arguments
   App (App (Var f) t1) t2
     | typeOrConstraint t1 && typeOrConstraint t2 ->
