@@ -551,7 +551,7 @@ instance Synthesizable Process where
                     , inputs
                     , outputs = case retLoc of
                         FunArg -> outputs
-                        Return -> []
+                        Return -> mempty
                     , delayStorage = mempty
                     , body = body'
                     }
@@ -690,18 +690,18 @@ instance Synthesizable Process where
                      <> [ CIR.SExpr $
                             CIR.ECall (const IEmpty <$> from) $
                               map getArg $
-                                inputs <> outputs <> (map (\(t, v, _) -> (t, v)) $ S.elems delayStorage)
+                                inputs <> outputs <> (S.elems $ S.map (\(t, v, _) -> (t, v)) $ delayStorage)
                         ]
                      <> (mconcat . map putOutput) outputs
              ]
           <> [CIR.SReturn $ Just $ CIR.EInt $ -1]
     contextToGlobal Context{..} =
       ( CIR.GFuncDeclare (Just CIR.Static) ret (const IEmpty <$> from) $
-          inputs <> outputs <> (map (\(t, n, _) -> (t, n)) . S.elems) delayStorage
+          inputs <> outputs <> (S.elems . S.map (\(t, n, _) -> (t, n))) delayStorage
       , CIR.GFuncDef
           (Just CIR.Static)
           ret
           (const IEmpty <$> from)
-          (inputs <> outputs <> (map (\(t, n, _) -> (t, n)) . S.elems) delayStorage)
+          (inputs <> outputs <> (S.elems . S.map (\(t, n, _) -> (t, n))) delayStorage)
           body
       )
