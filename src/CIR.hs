@@ -284,10 +284,10 @@ instance (Pretty a) => Pretty (Expression a) where
     ECallExpr e args ->
       pretty e <> (parens . hsep . punctuate comma . map pretty $ args)
     EArrayAccess e i -> pretty e <> brackets (pretty i)
-    EReference e -> pretty "&" <> pretty e
-    EDereference e -> pretty "*" <> pretty e
-    EMemberAccess e f -> pretty e <> pretty "." <> pretty f
-    EPointerAccess e f -> pretty e <> pretty "->" <> pretty f
+    EReference e -> pretty "&" <> (parens . pretty) e
+    EDereference e -> pretty "*" <> (parens . pretty) e
+    EMemberAccess e f -> (parens . pretty) e <> pretty "." <> pretty f
+    EPointerAccess e f -> (parens . pretty) e <> pretty "->" <> pretty f
     EParen e -> parens $ pretty e
     EStatement s e ->
       parens . braces $

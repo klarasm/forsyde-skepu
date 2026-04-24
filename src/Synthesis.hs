@@ -197,7 +197,7 @@ resolveOp ::
   (Int, [CStatement], (CType, CExpression))
 resolveOp tmpix stmts [(t1, expr1)] tout = \case
   "length" -> case t1 of
-    CIR.TConstructor _ _ -> (tmpix, stmts, (tout, CIR.ECallExpr (CIR.EPointerAccess expr1 (ExId $ Name "size")) []))
+    CIR.TConstructor _ _ -> (tmpix, stmts, (tout, CIR.ECallExpr (CIR.EMemberAccess expr1 (ExId $ Name "size")) []))
     _ -> error $ show t1
   u -> error $ "Unknown unary function: " <> u
 resolveOp tmpix stmts [(t1, expr1), (t2, expr2)] tout = \case
