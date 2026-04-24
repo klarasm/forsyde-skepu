@@ -572,8 +572,8 @@ instance Synthesizable Process where
                 schedVert = mapMaybe findVert <$> schedule
                 pointers = delaySigs <> inputs <> outputs
                 schedStmts = map (CIR.SExpr . vertexToExpr pointers subsysNew) <$> schedVert
-                locals = filter (\v -> not (elem v pointers)) . map (\(Edge v _ _) -> v) $ edges
-                localDefs = map ((\(t, s) -> CIR.SVarDecl t s Nothing) . (\(t, n) -> (removePoint t, n)) . varToCDef) locals
+                locals = S.filter (\v -> not (elem v pointers)) . S.fromList . map (\(Edge v _ _) -> v) $ edges
+                localDefs = S.map ((\(t, s) -> CIR.SVarDecl t s Nothing) . (\(t, n) -> (removePoint t, n)) . varToCDef) locals
                 context =
                   Context
                     { from = binder
@@ -584,7 +584,7 @@ instance Synthesizable Process where
                         Just d -> S.fromList d <> subsysStorage
                         Nothing -> error "delay mismatch"
                     , body = CIR.SScope $ case schedStmts of
-                        Just s -> localDefs <> s
+                        Just s -> S.elems localDefs <> s
                         Nothing -> error "invalid schedule"
                     }
              in (context : newC, context : allC1)
