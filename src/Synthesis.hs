@@ -419,6 +419,74 @@ makeMap args ports =
           M.fromList $ zipWith (\ix (t, n) -> (Ix ix, (t, CIR.EVar n))) [0 ..] ports
     m | otherwise -> m
 
+makeComb :: [(CType, Id IdExt)] -> [(CType, Id IdExt)] -> [CoreExpr] -> Expr CoreBndr -> (OutputLoc, CIR.Statement IdExt)
+makeComb inports outports tys e =
+  let (args, expr) = collectBinders e
+      argMap = makeMap args inports
+   in case expr of
+        App (App (App (App (App (App (App (App (Var v') te1) te2) te3) te4) e1) e2) e3) e4
+          | getOccString v' == "(,,,)" ->
+              let tout1 = exprToCType te1
+                  tout2 = exprToCType te2
+                  tout3 = exprToCType te3
+                  tout4 = exprToCType te4
+                  (cntr, init1, (_, ea1)) = exprToCExpr 0 FunArg argMap (map exprToCType tys) tout1 inports outports e1
+                  (cntr1, init2, (_, ea2)) = exprToCExpr cntr FunArg argMap (map exprToCType tys) tout2 inports outports e2
+                  (cntr2, init3, (_, ea3)) = exprToCExpr cntr1 FunArg argMap (map exprToCType tys) tout3 inports outports e3
+                  (_, init4, (_, ea4)) = exprToCExpr cntr2 FunArg argMap (map exprToCType tys) tout4 inports outports e4
+               in ( FunArg
+                  , CIR.SScope $
+                      init1
+                        <> init2
+                        <> init3
+                        <> init4
+                        <> [ CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 0) ea1
+                           , CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 1) ea2
+                           , CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 2) ea3
+                           , CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 3) ea4
+                           ]
+                  )
+        App (App (App (App (App (App (Var v') te1) te2) te3) e1) e2) e3
+          | getOccString v' == "(,,)" ->
+              let tout1 = exprToCType te1
+                  tout2 = exprToCType te2
+                  tout3 = exprToCType te3
+                  (cntr, init1, (_, ea1)) = exprToCExpr 0 FunArg argMap (map exprToCType tys) tout1 inports outports e1
+                  (cntr1, init2, (_, ea2)) = exprToCExpr cntr FunArg argMap (map exprToCType tys) tout2 inports outports e2
+                  (_, init3, (_, ea3)) = exprToCExpr cntr1 FunArg argMap (map exprToCType tys) tout3 inports outports e3
+               in ( FunArg
+                  , CIR.SScope $
+                      init1
+                        <> init2
+                        <> init3
+                        <> [ CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 0) ea1
+                           , CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 1) ea2
+                           , CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 2) ea3
+                           ]
+                  )
+        App (App (App (App (Var v') te1) te2) e1) e2
+          | getOccString v' == "(,)" ->
+              let tout1 = exprToCType te1
+                  tout2 = exprToCType te2
+                  (cntr, init1, (_, ea1)) = exprToCExpr 0 FunArg argMap (map exprToCType tys) tout1 inports outports e1
+                  (_, init2, (_, ea2)) = exprToCExpr cntr FunArg argMap (map exprToCType tys) tout2 inports outports e2
+               in ( FunArg
+                  , CIR.SScope $
+                      init1
+                        <> init2
+                        <> [ CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 0) ea1
+                           , CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 1) ea2
+                           ]
+                  )
+        _ ->
+            let tout1 = exprToCType $ last tys
+                (_, init1, (_, ea1)) = exprToCExpr 0 FunArg argMap (map exprToCType $ init tys) tout1 inports outports expr
+             in ( FunArg
+                , CIR.SScope $
+                    init1
+                      <> [ CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 0) ea1 ]
+                )
+
 bodyToStatement :: [(CType, Id IdExt)] -> [(CType, Id IdExt)] -> CoreExpr -> (OutputLoc, CStatement)
 bodyToStatement inports outports = \case
   App (App (App (App (App (App (App (App (App (Var v) _) _) _) _) _) _) _) _) e ->
@@ -428,182 +496,24 @@ bodyToStatement inports outports = \case
   App (App (App (App (App (App (App (Var v) _) _) _) _) _) _) e ->
     error $ "7App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
   App (App (App (App (App (App (Var v) t1) t2) t3) t4) t5) e
-    | getOccString v == "comb14" ->
-        let (args, expr) = collectBinders e
-            argMap = makeMap args inports
-         in case expr of
-              App (App (App (App (App (App (App (App (Var v') te1) te2) te3) te4) e1) e2) e3) e4
-                | getOccString v' == "(,,,)" ->
-                    let tout1 = exprToCType te1
-                        tout2 = exprToCType te2
-                        tout3 = exprToCType te3
-                        tout4 = exprToCType te4
-                        (cntr, init1, (_, ea1)) = exprToCExpr 0 FunArg argMap (map exprToCType [t1]) tout1 inports outports e1
-                        (cntr1, init2, (_, ea2)) = exprToCExpr cntr FunArg argMap (map exprToCType [t1]) tout2 inports outports e2
-                        (cntr2, init3, (_, ea3)) = exprToCExpr cntr1 FunArg argMap (map exprToCType [t1]) tout3 inports outports e3
-                        (_, init4, (_, ea4)) = exprToCExpr cntr2 FunArg argMap (map exprToCType [t1]) tout4 inports outports e4
-                     in ( FunArg
-                        , CIR.SScope $
-                            init1
-                              <> init2
-                              <> init3
-                              <> init4
-                              <> [ CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 0) ea1
-                                 , CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 1) ea2
-                                 , CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 2) ea3
-                                 , CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 3) ea4
-                                 ]
-                        )
-              e' -> error . showPprUnsafe $ e'
-    | getOccString v == "comb23" ->
-        let (args, expr) = collectBinders e
-            argMap = makeMap args inports
-         in case expr of
-              App (App (App (App (App (App (Var v') te1) te2) te3) e1) e2) e3
-                | getOccString v' == "(,,)" ->
-                    let tout1 = exprToCType te1
-                        tout2 = exprToCType te2
-                        tout3 = exprToCType te3
-                        (cntr, init1, (_, ea1)) = exprToCExpr 0 FunArg argMap (map exprToCType [t1, t2]) tout1 inports outports e1
-                        (cntr1, init2, (_, ea2)) = exprToCExpr cntr FunArg argMap (map exprToCType [t1, t2]) tout2 inports outports e2
-                        (_, init3, (_, ea3)) = exprToCExpr cntr1 FunArg argMap (map exprToCType [t1, t2]) tout3 inports outports e3
-                     in ( FunArg
-                        , CIR.SScope $
-                            init1
-                              <> init2
-                              <> init3
-                              <> [ CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 0) ea1
-                                 , CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 1) ea2
-                                 , CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 2) ea3
-                                 ]
-                        )
-              e' -> error . showPprUnsafe $ e'
-    | getOccString v == "comb32" ->
-        let (args, expr) = collectBinders e
-            argMap = makeMap args inports
-         in case expr of
-              App (App (App (App (Var v') te1) te2) e1) e2
-                | getOccString v' == "(,)" ->
-                    let tout1 = exprToCType te1
-                        tout2 = exprToCType te2
-                        (cntr, init1, (_, ea1)) = exprToCExpr 0 FunArg argMap (map exprToCType [t1, t2, t3]) tout1 inports outports e1
-                        (_, init2, (_, ea2)) = exprToCExpr cntr FunArg argMap (map exprToCType [t1, t2, t3]) tout2 inports outports e2
-                     in ( FunArg
-                        , CIR.SScope $
-                            init1
-                              <> init2
-                              <> [ CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 0) ea1
-                                 , CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 1) ea2
-                                 ]
-                        )
-              e' -> error . showPprUnsafe $ e'
-    | getOccString v == "comb41" ->
-        let (args, expr) = collectBinders e
-            argMap = makeMap args inports
-            tout1 = exprToCType t5
-            (_, init1, (_, ea1)) = exprToCExpr 0 FunArg argMap (map exprToCType [t1, t2, t3, t4]) tout1 inports outports expr
-         in ( FunArg
-            , CIR.SScope $
-                init1
-                  <> [ CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 0) ea1 ]
-            )
+    | getOccString v == "comb14" -> makeComb inports outports [t1, t2, t3, t4, t5] e
+    | getOccString v == "comb23" -> makeComb inports outports [t1, t2, t3, t4, t5] e
+    | getOccString v == "comb32" -> makeComb inports outports [t1, t2, t3, t4, t5] e
+    | getOccString v == "comb41" -> makeComb inports outports [t1, t2, t3, t4, t5] e
     | otherwise -> error $ "6App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
   App (App (App (App (App (Var v) t1) t2) t3) t4) e
-    | getOccString v == "comb13" ->
-        let (args, expr) = collectBinders e
-            argMap = makeMap args inports
-         in case expr of
-              App (App (App (App (App (App (Var v') te1) te2) te3) e1) e2) e3
-                | getOccString v' == "(,,)" ->
-                    let tout1 = exprToCType te1
-                        tout2 = exprToCType te2
-                        tout3 = exprToCType te3
-                        (cntr, init1, (_, ea1)) = exprToCExpr 0 FunArg argMap (map exprToCType [t1]) tout1 inports outports e1
-                        (cntr1, init2, (_, ea2)) = exprToCExpr cntr FunArg argMap (map exprToCType [t1]) tout2 inports outports e2
-                        (_, init3, (_, ea3)) = exprToCExpr cntr1 FunArg argMap (map exprToCType [t1]) tout3 inports outports e3
-                     in ( FunArg
-                        , CIR.SScope $
-                            init1
-                              <> init2
-                              <> init3
-                              <> [ CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 0) ea1
-                                 , CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 1) ea2
-                                 , CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 2) ea3
-                                 ]
-                        )
-              e' -> error . showPprUnsafe $ e'
-    | getOccString v == "comb22" ->
-        let (args, expr) = collectBinders e
-            argMap = makeMap args inports
-         in case expr of
-              App (App (App (App (Var v') te1) te2) e1) e2
-                | getOccString v' == "(,)" ->
-                    let tout1 = exprToCType te1
-                        tout2 = exprToCType te2
-                        (cntr, init1, (_, ea1)) = exprToCExpr 0 FunArg argMap (map exprToCType [t1, t2]) tout1 inports outports e1
-                        (_, init2, (_, ea2)) = exprToCExpr cntr FunArg argMap (map exprToCType [t1, t2]) tout2 inports outports e2
-                     in ( FunArg
-                        , CIR.SScope $
-                            init1
-                              <> init2
-                              <> [ CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 0) ea1
-                                 , CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 1) ea2
-                                 ]
-                        )
-              e' -> error . showPprUnsafe $ e'
-    | getOccString v == "comb31" ->
-        let (args, expr) = collectBinders e
-            argMap = makeMap args inports
-            (_, init1, (_, ea1)) = exprToCExpr 0 FunArg argMap (map exprToCType [t1, t2, t3]) (exprToCType t4) inports outports expr
-         in ( FunArg
-            , CIR.SScope $
-                init1
-                  <> [ CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 0) ea1
-                     ]
-            )
+    | getOccString v == "comb13" -> makeComb inports outports [t1, t2, t3, t4] e
+    | getOccString v == "comb22" -> makeComb inports outports [t1, t2, t3, t4] e
+    | getOccString v == "comb31" -> makeComb inports outports [t1, t2, t3, t4] e
     | otherwise ->
         error $ "5App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
   App (App (App (App (Var v) t1) t2) t3) e
-    | getOccString v == "comb21" ->
-        let (args, expr) = collectBinders e
-            argMap = makeMap args inports
-            (_, init1, (_, ea1)) = exprToCExpr 0 FunArg argMap (map exprToCType [t1, t2]) (exprToCType t3) inports outports expr
-         in ( FunArg
-            , CIR.SScope $
-                init1
-                  <> [ CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 0) ea1
-                     ]
-            )
-    | getOccString v == "comb12" ->
-        let (args, expr) = collectBinders e
-            argMap = makeMap args inports
-         in case expr of
-              App (App (App (App (Var v') tout1) tout2) e1) e2
-                | getOccString v' == "(,)" ->
-                    let (cntr, init1, (_, ea1)) = exprToCExpr 0 FunArg argMap (map exprToCType [t1]) (exprToCType tout1) inports outports e1
-                        (_, init2, (_, ea2)) = exprToCExpr cntr FunArg argMap (map exprToCType [t1]) (exprToCType tout2) inports outports e2
-                     in ( FunArg
-                        , CIR.SScope $
-                            init1
-                              <> init2
-                              <> [ CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 0) $ ea1
-                                 , CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 1) $ ea2
-                                 ]
-                        )
-              e' -> error . showPprUnsafe $ e'
+    | getOccString v == "comb21" -> makeComb inports outports [t1, t2, t3] e
+    | getOccString v == "comb12" -> makeComb inports outports [t1, t2, t3] e
     | otherwise ->
         error $ "4App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
   App (App (App (Var v) t1) t2) e
-    | getOccString v == "comb11" ->
-        let (args, expr) = collectBinders e
-            argMap = makeMap args inports
-            (_, init1, (_, ea1)) = exprToCExpr 0 FunArg argMap (map exprToCType [t1]) (exprToCType t2) inports outports expr
-         in ( FunArg
-            , CIR.SScope $
-                init1
-                  <> [ CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 0) $ ea1
-                     ]
-            )
+    | getOccString v == "comb11" -> makeComb inports outports [t1, t2]  e
     | otherwise ->
         error $ "3App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
   App (App (Var v) _) e
