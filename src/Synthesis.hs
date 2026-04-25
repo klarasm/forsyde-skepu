@@ -61,6 +61,7 @@ data (Show a) => Context a = Context
   , inputs :: [(CType, Id IdExt)]
   , outputs :: [(CType, Id IdExt)]
   , delayStorage :: S.Set (CType, Id IdExt, CExpression)
+  , delay :: Bool
   , body :: CStatement
   }
   deriving (Show)
@@ -161,18 +162,17 @@ outputArgs = map CIR.EVar outputIds
 vertexToExpr :: (Foldable t) => t (Id IdExt) -> [Context a] -> Vertex -> CExpression
 vertexToExpr pointers context Vertex{id = _, ..} = case process of
   Right _ -> undefined
-  Left v -> CIR.ECall (const IEmpty <$> v) $ map ioToExpr (map Direct inputs) <> map ioToExpr (map Direct outputs) <> delayDirect <> (delayParams v)
+  Left v -> CIR.ECall (const IEmpty <$> v) $ map ioToExpr (map Direct inputs) <> map ioToExpr (map Direct outputs) <> (delayParams v)
  where
   delayParams v =
     S.elems
-      . S.map (\(_, s, _) -> CIR.EVar s)
+      . S.map (\(_, s, _) -> case s of
+        ExId Tmp -> CIR.EVar . (<> ExId Tmp) . Direct . head $ outputs
+        _ -> CIR.EVar s)
       . mconcat
       . map (\Context{delayStorage} -> delayStorage)
       . filter (\Context{from} -> v == from)
       $ context
-  delayDirect = if delay
-    then [CIR.EVar $ (Direct . head $ outputs) <> ExId Tmp]
-    else []
   ioToExpr io =
     if elem io pointers
       then CIR.EVar io
@@ -581,15 +581,18 @@ instance Synthesizable Process where
             let inputs = zip (map portToC inports) inputIds
                 outputs = zip (map portToC outports) outputIds
                 (retLoc, body') = case delay of
-                  Just b -> (FunArg, b)
+                  Just (b, _) -> (FunArg, b)
                   Nothing -> bodyToStatement inputs outputs body
                 delay = case body of
-                  App (App (Var v) _) _
-                    | isDelayVar v -> Just $
+                  App (App (Var v) _) e
+                    | isDelayVar v -> Just
+                      (
                         CIR.SScope
                             [ CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 0) (CIR.EDereference . CIR.EVar $ ExId Tmp)
                             , CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Tmp) (CIR.EDereference . CIR.EVar $ ExId Input <> Ix 0)
                             ]
+                      , delayExprToC e
+                      )
                   _ -> Nothing
                 context =
                   Context
@@ -599,13 +602,14 @@ instance Synthesizable Process where
                         Return -> fst . head $ outputs
                     , inputs
                     , outputs = case retLoc of
-                        FunArg ->
-                          outputs
-                          <> case delay of
-                            Just _ -> [(fst . head $ outputs, ExId Tmp)]
-                            Nothing -> []
+                        FunArg -> outputs
                         Return -> mempty
-                    , delayStorage = mempty
+                    , delayStorage = case delay of
+                      Just (_, e) -> S.singleton (fst . head $ outputs, ExId Tmp, e)
+                      _ -> mempty
+                    , delay = case delay of
+                      Just _ -> True
+                      Nothing -> False
                     , body = body'
                     }
              in (context : newC, context : allC)
@@ -630,7 +634,7 @@ instance Synthesizable Process where
                     $ delays
                 delayTypes = map varToCDef delaySigs
                 delayDefs = delayExprs >>= \_c -> Just $ ((\(t, v) e -> (t, v <> ExId Tmp, e)) <$> delayTypes) <*> _c
-                subsysStorage = mconcat . map (\Context{delayStorage} -> delayStorage) $ subsysNew
+                subsysStorage = mconcat . mapMaybe (\Context{delayStorage, delay} -> if delay then Nothing else Just delayStorage) $ subsysNew
                 findVert vid = find (\Vertex{id = i} -> i == vid) vertices
                 schedVert = mapMaybe findVert <$> schedule
                 delaySigs' = map (\b -> Direct b <> ExId Tmp) delaySigs
@@ -645,6 +649,7 @@ instance Synthesizable Process where
                     , ret = CIR.TVoid
                     , inputs = inDefs
                     , outputs = outDefs
+                    , delay = False
                     , delayStorage = case delayDefs of
                         Just d -> S.fromList d <> subsysStorage
                         Nothing -> error "delay mismatch"
