@@ -433,7 +433,7 @@ translateExpr parent procs expr' = out
   sEdges =
     mapMaybe
       ( \Edge{source, target} ->
-          if isDelayVertex (procs <> processes) vertices source
+          if isDelayVertex vertices source
             then Nothing
             else Just $ (source, target)
       )
@@ -459,16 +459,17 @@ translateExpr parent procs expr' = out
 procsFromId :: Id a -> [Process] -> [Process]
 procsFromId var = filter (\Process{binder} -> binder == (const () <$> var))
 
-isDelayVertex :: [Process] -> [Vertex] -> Int -> Bool
-isDelayVertex processes vertices vid =
-  case mapMaybe (delayVertex processes) . filter (\Vertex{id = i} -> i == vid) $ vertices of
+isDelayVertex :: [Vertex] -> Int -> Bool
+isDelayVertex vertices vid =
+  case mapMaybe delayVertex . filter (\Vertex{id = i} -> i == vid) $ vertices of
     _ : [] -> True
     _ -> False
 
-delayVertex :: [Process] -> Vertex -> Maybe Vertex
-delayVertex processes v = case delayProc processes v of
-  _ : _ -> Just v
-  _ -> Nothing
+delayVertex :: Vertex -> Maybe Vertex
+delayVertex v@Vertex {delay} =
+  if delay
+    then Just v
+    else Nothing
 
 delayProc :: [Process] -> Vertex -> [Process]
 delayProc processes = \case
