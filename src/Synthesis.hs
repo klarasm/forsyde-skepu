@@ -546,12 +546,7 @@ bodyToStatement inports outports = \case
     | otherwise -> error $ "3App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
   App (App (Var v) _) e
     | getOccString v == "delay" ->
-        ( FunArg
-        , CIR.SScope
-            [ CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 0) (CIR.EDereference . CIR.EVar $ ExId Tmp <> Ix 0)
-            , CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Tmp <> Ix 0) (CIR.EDereference . CIR.EVar $ ExId Input <> Ix 0)
-            ]
-        )
+        (FunArg, delayBody)
     | otherwise -> error $ "2App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
   App (Var v) e -> error $ "1App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
   -- Might be a regular function, i.e. not a process
@@ -565,11 +560,21 @@ bodyToStatement inports outports = \case
               <> [CIR.SReturn . Just $ expr]
         )
   e -> error . showPprUnsafe $ e
+  where
+    -- The delay can both be used on intermediary signals and input/output
+    -- signals. When used on an output signal, it needs to also output the
+    -- current value of the delay, hence the shuffling of values.
+    delayBody =
+      CIR.SScope
+        [ CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 0) (CIR.EDereference . CIR.EVar $ ExId Tmp)
+        , CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Tmp) (CIR.EDereference . CIR.EVar $ ExId Input <> Ix 0)
+        ]
 
 removePoint :: CIR.Type a -> CIR.Type a
 removePoint = \case
   CIR.TPointer t -> t
   t -> t
+
 
 instance Synthesizable Process where
   synthesize procs p@Process{..} (newC, allC) =
@@ -580,19 +585,10 @@ instance Synthesizable Process where
           Nothing ->
             let inputs = zip (map portToC inports) inputIds
                 outputs = zip (map portToC outports) outputIds
-                (retLoc, body') = case delay of
-                  Just (b, _) -> (FunArg, b)
-                  Nothing -> bodyToStatement inputs outputs body
-                delay = case body of
+                (retLoc, body') = bodyToStatement inputs outputs body
+                delayExpr = case body of
                   App (App (Var v) _) e
-                    | isDelayVar v -> Just
-                      (
-                        CIR.SScope
-                            [ CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 0) (CIR.EDereference . CIR.EVar $ ExId Tmp)
-                            , CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Tmp) (CIR.EDereference . CIR.EVar $ ExId Input <> Ix 0)
-                            ]
-                      , delayExprToC e
-                      )
+                    | isDelayVar v -> Just $ delayExprToC e
                   _ -> Nothing
                 context =
                   Context
@@ -604,10 +600,10 @@ instance Synthesizable Process where
                     , outputs = case retLoc of
                         FunArg -> outputs
                         Return -> mempty
-                    , delayStorage = case delay of
-                      Just (_, e) -> S.singleton (fst . head $ outputs, ExId Tmp, e)
+                    , delayStorage = case delayExpr of
+                      Just e -> S.singleton (fst . head $ outputs, ExId Tmp, e)
                       _ -> mempty
-                    , delay = case delay of
+                    , delay = case delayExpr of
                       Just _ -> True
                       Nothing -> False
                     , body = body'
