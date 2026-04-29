@@ -623,7 +623,7 @@ instance Synthesizable Process where
                   mconcat
                     . map
                       ( \v@Vertex{outputs = outputs'} ->
-                          if length outputs == 1
+                          if length outputs' == 1
                             then outputs'
                             else error $ "invalid delay outputs: " <> show v
                       )
