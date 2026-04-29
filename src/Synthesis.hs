@@ -263,6 +263,11 @@ exprToLambda tmpix outLoc args tin tout inports outports expr = case expr of
                 expr'' = CIR.ELambda [] [(t1', in1), (t2', in2)] $ CIR.SScope [CIR.SReturn . Just $ expr']
              in (tmpix', stmts, (tout, expr''))
           _ -> undefined
+  e@(Lam _ _) ->
+    let (b1, e1) = collectBinders e
+        args' = M.fromList . zipWith varToArgMap b1 $ inputIds
+        varToArgMap v i = (Direct v, (varToCType v, CIR.EVar i))
+    in exprToLambda tmpix outLoc (args' <> args) tin tout inports outports e1
   e ->
     let (tmpix1, stmts1, (_, expr1)) = exprToCExpr tmpix outLoc (M.map (\(t', e') -> (removePoint t', e')) args) tin tout inputs outports e
         inputs = zip tin inputIds
@@ -270,17 +275,17 @@ exprToLambda tmpix outLoc args tin tout inports outports expr = case expr of
      in (tmpix1, stmts1, (tout, expr2))
 
 -- Horrible, should trim arguments
-skelAppToCExpr :: Int -> OutputLoc -> p1 -> [CStatement] -> [b1] -> CType -> [(CType, b2)] -> p2 -> Id IdExt -> CExpression -> (Int, [CStatement], (CType, CExpression))
+skelAppToCExpr :: Int -> OutputLoc -> p1 -> [CStatement] -> [CType] -> CType -> [(CType, b2)] -> p2 -> Id IdExt -> CExpression -> (Int, [CStatement], (CType, CExpression))
 skelAppToCExpr tmpix1 ret args stmts1 tin tout inports outports skel e1' =
   let (tmpix2, outname) = mkTemp tmpix1
       (tmpix3, skelInstance) = mkTemp tmpix2
-      inputs = map CIR.EDereference . zipWith const inputArgs $ tin
+      inputs = zipWith (derefTo CIR.TVoid) (map fst inports) inputArgs
       ini = case tout of
         CIR.TConstructor _ _ ->
           Just
             [ CIR.ECallExpr
                 ( CIR.EMemberAccess
-                    (derefArg (needDeref 0 (fst . head $ inports, CIR.TVoid)) $ head inputArgs)
+                    (derefTo CIR.TVoid (fst . head $ inports) $ head inputArgs)
                     (ExId $ Name "size")
                 )
                 []
@@ -347,7 +352,7 @@ exprToCExpr tmpix outLoc args tin tout inports outports expr = case expr of
   App (App (App (Var f) t1) t2) e
     | typeOrConstraint t1 && typeOrConstraint t2 ->
         let (tmpix1, stmts1, (t1', e1)) = exprToCExpr tmpix FunArg args tin tout inports outports e
-            v1 = derefArg (needDeref 0 (fst . head $ inports, exprToCType t1)) $ CIR.EVar $ ExId Input <> Ix 0
+            v1 = derefTo (exprToCType t1) (fst . head $ inports) $ CIR.EVar $ ExId Input <> Ix 0
          in resolveOp tmpix1 stmts1 [(t1', e1), (head tin, v1)] tout $ getOccString f
   -- Inner unary function applied onto an expression and var
   App (App (App (Var inner) t1) e) (Var v)
@@ -383,14 +388,13 @@ exprToCExpr tmpix outLoc args tin tout inports outports expr = case expr of
   App _ (Lit (LitDouble f)) -> (tmpix, [], (CIR.TInt, CIR.EFloat $ fromRational f))
   Lit (LitDouble f) -> (tmpix, [], (CIR.TFloat, CIR.EFloat $ fromRational f))
   Var v -> case M.lookup (Direct v) args of
-    Just (t', v') -> (tmpix, [], (tout, derefArg (needDeref 0 (t', tout)) v'))
+    Just (t', v') -> (tmpix, [], (tout, derefTo tout t' v'))
     -- Assume the Var is a function
     -- TODO: need to rethink multiple output
     Nothing ->
       let (inputs, outputs) = extractTypes [] . varType $ v
           (inPorts, outPorts) = makePorts . extractTypes [] . varType $ v
-          deref = map (needDeref 0) . flip zip tin $ map (fst) inports
-          inArgs = zipWith derefArg deref $ zipWith const inputArgs inputs
+          inArgs = zipWith3 derefTo tin (map fst inports) inputArgs
        in if length outputs == 1
             then
               ( tmpix
@@ -413,6 +417,9 @@ derefArg num var = case compare num 0 of
   GT -> derefArg (num - 1) $ CIR.EDereference var
   EQ -> var
 
+derefTo :: CIR.Type a1 -> CIR.Type a2 -> CIR.Expression a -> CIR.Expression a
+derefTo outty inty = derefArg (needDeref 0 (inty, outty))
+
 -- | Make an argument map, from args if existent otherwise from ports
 makeMap :: (Ord a1, Eq a2, Eq a3) => [CoreBndr] -> [(a2, Id a3)] -> M.Map (Id a1) (a2, CIR.Expression a3)
 makeMap args ports =
@@ -420,7 +427,7 @@ makeMap args ports =
     m
       | m == mempty ->
           M.fromList $ zipWith (\ix (t, n) -> (Ix ix, (t, CIR.EVar n))) [0 ..] ports
-    m | otherwise -> m
+      | otherwise -> m
 
 makeComb :: [(CType, Id IdExt)] -> [(CType, Id IdExt)] -> [CoreExpr] -> Expr CoreBndr -> (OutputLoc, CIR.Statement IdExt)
 makeComb inports outports tys e =
