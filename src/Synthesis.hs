@@ -105,20 +105,22 @@ typeToCType = \case
     | getOccString v == "Integer" -> CIR.TInt
     | getOccString v == "Float" -> CIR.TFloat
     | getOccString v == "Double" -> CIR.TFloat
-  TyConApp v1 [v2] | getOccString v1 == "Num" -> case v2 of
-    TyVarTy v2'
-      | getOccString v2' == "Integer" -> CIR.TInt
-      | getOccString v2' == "Int" -> CIR.TInt
-      | getOccString v2' == "Float" -> CIR.TFloat
-      | getOccString v2' == "Double" -> CIR.TFloat
-    TyConApp v2' _
-      | getOccString v2' == "Integer" -> CIR.TInt
-      | getOccString v2' == "Int" -> CIR.TInt
-      | getOccString v2' == "Float" -> CIR.TFloat
-      | getOccString v2' == "Double" -> CIR.TFloat
-    TyConApp v2' _ -> error . showPprUnsafe $ v2'
-    _ -> error . showPprUnsafe $ v2
+  TyConApp v1 [v2]
+    | getOccString v1 == "Num" -> case v2 of
+      TyVarTy v2'
+        | getOccString v2' == "Integer" -> CIR.TInt
+        | getOccString v2' == "Int" -> CIR.TInt
+        | getOccString v2' == "Float" -> CIR.TFloat
+        | getOccString v2' == "Double" -> CIR.TFloat
+      TyConApp v2' _
+        | getOccString v2' == "Integer" -> CIR.TInt
+        | getOccString v2' == "Int" -> CIR.TInt
+        | getOccString v2' == "Float" -> CIR.TFloat
+        | getOccString v2' == "Double" -> CIR.TFloat
+      TyConApp v2' _ -> error . showPprUnsafe $ v2'
+      _ -> error . showPprUnsafe $ v2
   TyConApp v1 _ | getOccString v1 == "Floating" -> CIR.TFloat
+  TyConApp v1 _ | getOccString v1 == "Fractional" -> CIR.TFloat
   TyConApp v1 _ | getOccString v1 == "Integral" -> CIR.TInt
   TyConApp v a -> error $ "TyConApp: " <> (getOccString . tyConName) v <> " " <> showPprUnsafe a
   t -> error $ "Something else: " <> showPprUnsafe t
