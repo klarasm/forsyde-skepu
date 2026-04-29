@@ -107,8 +107,10 @@ instance Show BinaryOperator where
 data Type a
   = TVoid
   | TInt
+  | TLong
   | TSizeT
   | TFloat
+  | TDouble
   | TChar
   | TIdent (IR.Id a)
   | TPointer (Type a)
@@ -248,8 +250,10 @@ instance (Pretty a) => Pretty (Type a) where
   pretty = \case
     TVoid -> pretty "void"
     TInt -> pretty "int"
+    TLong -> pretty "long"
     TSizeT -> pretty "size_t"
     TFloat -> pretty "float"
+    TDouble -> pretty "double"
     TChar -> pretty "char"
     TIdent s -> pretty s
     TPointer t@(TPointer _) -> pretty t <> pretty "*"

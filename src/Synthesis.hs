@@ -95,33 +95,33 @@ portToC = \case
 typeToCType :: Type -> CType
 typeToCType = \case
   TyVarTy v
-    | getOccString v == "Int" -> CIR.TInt
-    | getOccString v == "Integer" -> CIR.TInt
+    | getOccString v == "Int" -> CIR.TLong
+    | getOccString v == "Integer" -> CIR.TLong
     | getOccString v == "Float" -> CIR.TFloat
-    | getOccString v == "Double" -> CIR.TFloat
+    | getOccString v == "Double" -> CIR.TDouble
   TyVarTy v -> error $ "TyVarTy: " <> showPprUnsafe v
   TyConApp v []
-    | getOccString v == "Int" -> CIR.TInt
-    | getOccString v == "Integer" -> CIR.TInt
+    | getOccString v == "Int" -> CIR.TLong
+    | getOccString v == "Integer" -> CIR.TLong
     | getOccString v == "Float" -> CIR.TFloat
-    | getOccString v == "Double" -> CIR.TFloat
+    | getOccString v == "Double" -> CIR.TDouble
   TyConApp v1 [v2]
     | getOccString v1 == "Num" -> case v2 of
       TyVarTy v2'
-        | getOccString v2' == "Integer" -> CIR.TInt
-        | getOccString v2' == "Int" -> CIR.TInt
+        | getOccString v2' == "Integer" -> CIR.TLong
+        | getOccString v2' == "Int" -> CIR.TLong
         | getOccString v2' == "Float" -> CIR.TFloat
-        | getOccString v2' == "Double" -> CIR.TFloat
+        | getOccString v2' == "Double" -> CIR.TDouble
       TyConApp v2' _
-        | getOccString v2' == "Integer" -> CIR.TInt
-        | getOccString v2' == "Int" -> CIR.TInt
+        | getOccString v2' == "Integer" -> CIR.TLong
+        | getOccString v2' == "Int" -> CIR.TLong
         | getOccString v2' == "Float" -> CIR.TFloat
-        | getOccString v2' == "Double" -> CIR.TFloat
+        | getOccString v2' == "Double" -> CIR.TDouble
       TyConApp v2' _ -> error . showPprUnsafe $ v2'
       _ -> error . showPprUnsafe $ v2
   TyConApp v1 _ | getOccString v1 == "Floating" -> CIR.TFloat
   TyConApp v1 _ | getOccString v1 == "Fractional" -> CIR.TFloat
-  TyConApp v1 _ | getOccString v1 == "Integral" -> CIR.TInt
+  TyConApp v1 _ | getOccString v1 == "Integral" -> CIR.TLong
   TyConApp v a -> error $ "TyConApp: " <> (getOccString . tyConName) v <> " " <> showPprUnsafe a
   t -> error $ "Something else: " <> showPprUnsafe t
 
@@ -381,12 +381,12 @@ exprToCExpr tmpix outLoc args tin tout inports outports expr = case expr of
     | typeOrConstraint t1 && typeOrConstraint t2 ->
         resolveOp tmpix [] (take 2 $ M.elems args) tout $ getOccString f
   -- An integer literal
-  App _ (Lit (LitNumber _ i)) -> (tmpix, [], (CIR.TInt, CIR.EInt $ fromIntegral i))
-  Lit (LitNumber _ i) -> (tmpix, [], (CIR.TInt, CIR.EInt $ fromIntegral i))
-  App _ (Lit (LitFloat f)) -> (tmpix, [], (CIR.TInt, CIR.EFloat $ fromRational f))
+  App _ (Lit (LitNumber _ i)) -> (tmpix, [], (CIR.TLong, CIR.EInt $ fromIntegral i))
+  Lit (LitNumber _ i) -> (tmpix, [], (CIR.TLong, CIR.EInt $ fromIntegral i))
+  App _ (Lit (LitFloat f)) -> (tmpix, [], (CIR.TLong, CIR.EFloat $ fromRational f))
   Lit (LitFloat f) -> (tmpix, [], (CIR.TFloat, CIR.EFloat $ fromRational f))
-  App _ (Lit (LitDouble f)) -> (tmpix, [], (CIR.TInt, CIR.EFloat $ fromRational f))
-  Lit (LitDouble f) -> (tmpix, [], (CIR.TFloat, CIR.EFloat $ fromRational f))
+  App _ (Lit (LitDouble f)) -> (tmpix, [], (CIR.TDouble, CIR.EFloat $ fromRational f))
+  Lit (LitDouble f) -> (tmpix, [], (CIR.TDouble, CIR.EFloat $ fromRational f))
   Var v -> case M.lookup (Direct v) args of
     Just (t', v') -> (tmpix, [], (tout, derefTo tout t' v'))
     -- Assume the Var is a function
@@ -726,7 +726,9 @@ instance Synthesizable Process where
         ]
     typeToFormat ty = case removePoint ty of
       CIR.TInt -> "%d"
+      CIR.TLong -> "%ld"
       CIR.TFloat -> "%f"
+      CIR.TDouble -> "%f"
       CIR.TChar -> "%c"
       CIR.TSizeT -> "%zu"
       t -> error $ "unknown format string for " <> show t
