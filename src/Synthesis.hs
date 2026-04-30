@@ -651,8 +651,8 @@ instance Synthesizable Process where
                 delaySigs' = map (\b -> Direct b <> ExId Delay) delaySigs
                 pointers = delaySigs' <> map Direct inputs <> map Direct outputs
                 schedStmts = map (CIR.SExpr . vertexToExpr pointers) <$> schedVert
-                locals = S.filter (\v -> not (elem (Direct v) (pointers <> map Direct delaySigs))) . S.fromList . map (\(Edge v _ _) -> v) $ edges
-                localDefs = S.map ((\(t, s) -> CIR.SVarDecl t s Nothing) . (\(t, n) -> (removePoint t, n)) . varToCDef) locals
+                locals = filter (\v -> not (elem (Direct v) (pointers <> map Direct delaySigs))) . map (\(Edge v _ _) -> v) $ edges
+                localDefs = map ((\(t, s) -> CIR.SVarDecl t s Nothing) . (\(t, n) -> (removePoint t, n)) . varToCDef) locals
                 delayTmps = map (\(t, i) -> CIR.SVarDef (removePoint t) i Nothing (CIR.EDereference . CIR.EVar $ i <> ExId Delay)) delayTypes
                 context =
                   Context
@@ -665,7 +665,7 @@ instance Synthesizable Process where
                         Just d -> S.fromList d <> subsysStorage
                         Nothing -> error "delay mismatch"
                     , body = CIR.SScope $ case schedStmts of
-                        Just s -> S.elems localDefs <> delayTmps <> s
+                        Just s -> localDefs <> delayTmps <> s
                         Nothing -> error "invalid schedule"
                     }
              in (context : newC, context : allC1)
