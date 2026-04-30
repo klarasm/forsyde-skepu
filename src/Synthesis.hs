@@ -630,7 +630,7 @@ instance Synthesizable Process where
                 (subsysNew, allC1) = foldr (synthesize procs') (newC, allC) systemProcs
                 inDefs = map varToCDef inputs
                 outDefs = map varToCDef outputs
-                delays = mapMaybe delayVertex vertices
+                delays = filter (\Vertex {delay} -> delay) vertices
                 delayProcs = mconcat . map (delayProc procs) $ delays
                 delayBodies = sequence . map (getDelayExpr . \Process{body = b} -> b) $ delayProcs
                 delayExprs = map delayExprToC <$> delayBodies
