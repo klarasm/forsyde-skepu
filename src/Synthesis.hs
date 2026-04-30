@@ -511,66 +511,53 @@ bodyToStatement :: [(CType, Id IdExt)] -> [(CType, Id IdExt)] -> CoreExpr -> (Ou
 bodyToStatement inports outports = \case
   App (App (App (App (App (App (App (App (App (App (App (App (App (Var v) t1) t2) t3) t4) t5) t6) t7) t8) t9) t10) t11) t12) e
     | getOccString v == "comb84" -> makeComb inports outports [t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11, t12] e
-    | otherwise -> error $ "13App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
   App (App (App (App (App (App (App (App (App (App (App (App (Var v) t1) t2) t3) t4) t5) t6) t7) t8) t9) t10) t11) e
     | getOccString v == "comb74" -> makeComb inports outports [t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11] e
     | getOccString v == "comb83" -> makeComb inports outports [t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11] e
-    | otherwise -> error $ "12App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
   App (App (App (App (App (App (App (App (App (App (App (Var v) t1) t2) t3) t4) t5) t6) t7) t8) t9) t10) e
     | getOccString v == "comb64" -> makeComb inports outports [t1, t2, t3, t4, t5, t6, t7, t8, t9, t10] e
     | getOccString v == "comb73" -> makeComb inports outports [t1, t2, t3, t4, t5, t6, t7, t8, t9, t10] e
     | getOccString v == "comb82" -> makeComb inports outports [t1, t2, t3, t4, t5, t6, t7, t8, t9, t10] e
-    | otherwise -> error $ "11App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
   App (App (App (App (App (App (App (App (App (App (Var v) t1) t2) t3) t4) t5) t6) t7) t8) t9) e
     | getOccString v == "comb54" -> makeComb inports outports [t1, t2, t3, t4, t5, t6, t7, t8, t9] e
     | getOccString v == "comb63" -> makeComb inports outports [t1, t2, t3, t4, t5, t6, t7, t8, t9] e
     | getOccString v == "comb72" -> makeComb inports outports [t1, t2, t3, t4, t5, t6, t7, t8, t9] e
     | getOccString v == "comb81" -> makeComb inports outports [t1, t2, t3, t4, t5, t6, t7, t8, t9] e
-    | otherwise -> error $ "10App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
   App (App (App (App (App (App (App (App (App (Var v) t1) t2) t3) t4) t5) t6) t7) t8) e
     | getOccString v == "comb44" -> makeComb inports outports [t1, t2, t3, t4, t5, t6, t7, t8] e
     | getOccString v == "comb53" -> makeComb inports outports [t1, t2, t3, t4, t5, t6, t7, t8] e
     | getOccString v == "comb62" -> makeComb inports outports [t1, t2, t3, t4, t5, t6, t7, t8] e
     | getOccString v == "comb71" -> makeComb inports outports [t1, t2, t3, t4, t5, t6, t7, t8] e
-    | otherwise -> error $ "9App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
   App (App (App (App (App (App (App (App (Var v) t1) t2) t3) t4) t5) t6) t7) e
     | getOccString v == "comb34" -> makeComb inports outports [t1, t2, t3, t4, t5, t6, t7] e
     | getOccString v == "comb43" -> makeComb inports outports [t1, t2, t3, t4, t5, t6, t7] e
     | getOccString v == "comb52" -> makeComb inports outports [t1, t2, t3, t4, t5, t6, t7] e
     | getOccString v == "comb61" -> makeComb inports outports [t1, t2, t3, t4, t5, t6, t7] e
-    | otherwise -> error $ "8App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
   App (App (App (App (App (App (App (Var v) t1) t2) t3) t4) t5) t6) e
     | getOccString v == "comb24" -> makeComb inports outports [t1, t2, t3, t4, t5, t6] e
     | getOccString v == "comb33" -> makeComb inports outports [t1, t2, t3, t4, t5, t6] e
     | getOccString v == "comb42" -> makeComb inports outports [t1, t2, t3, t4, t5, t6] e
     | getOccString v == "comb51" -> makeComb inports outports [t1, t2, t3, t4, t5, t6] e
-    | otherwise -> error $ "7App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
   App (App (App (App (App (App (Var v) t1) t2) t3) t4) t5) e
     | getOccString v == "comb14" -> makeComb inports outports [t1, t2, t3, t4, t5] e
     | getOccString v == "comb23" -> makeComb inports outports [t1, t2, t3, t4, t5] e
     | getOccString v == "comb32" -> makeComb inports outports [t1, t2, t3, t4, t5] e
     | getOccString v == "comb41" -> makeComb inports outports [t1, t2, t3, t4, t5] e
-    | otherwise -> error $ "6App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
   App (App (App (App (App (Var v) t1) t2) t3) t4) e
     | getOccString v == "comb13" -> makeComb inports outports [t1, t2, t3, t4] e
     | getOccString v == "comb22" -> makeComb inports outports [t1, t2, t3, t4] e
     | getOccString v == "comb31" -> makeComb inports outports [t1, t2, t3, t4] e
-    | otherwise -> error $ "5App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
   App (App (App (App (Var v) t1) t2) t3) e
     | getOccString v == "comb12" -> makeComb inports outports [t1, t2, t3] e
     | getOccString v == "comb21" -> makeComb inports outports [t1, t2, t3] e
-    | otherwise -> error $ "4App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
   App (App (App (Var v) t1) t2) e
     | getOccString v == "comb11" -> makeComb inports outports [t1, t2]  e
-    | otherwise -> error $ "3App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
   App (App (Var v) t) e
     | typeOrConstraint t && getOccString v == "delay" ->
         ( FunArg
         , M.fromList [(ExId Input <> Ix 0, (fst . head $ inports, CIR.EVar $ ExId Input <> Ix 0))]
         , delayBody
         )
-    | otherwise -> error $ "2App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
-  App (Var v) e -> error $ "1App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
   -- Might be a regular function, i.e. not a process
   e@(Lam _ _) ->
     let (args, expr') = collectBinders e
