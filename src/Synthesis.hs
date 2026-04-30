@@ -162,20 +162,17 @@ outputIds = map ((ExId Output <>) . Ix) [0 ..]
 outputArgs :: [CExpression]
 outputArgs = map CIR.EVar outputIds
 
-vertexToExpr :: (Foldable t) => t (Id IdExt) -> [Context a] -> Vertex -> CExpression
-vertexToExpr pointers context Vertex{id = _, ..} = case process of
+vertexToExpr :: (Foldable t) => t (Id IdExt) -> (Vertex, Context a) -> CExpression
+vertexToExpr pointers (Vertex{id = _, ..}, Context {delayStorage}) = case process of
   Right _ -> undefined
-  Left v -> CIR.ECall (const IEmpty <$> v) $ map ioToExpr (map Direct inputs) <> map ioToExpr (map Direct outputs) <> (delayParams v)
+  Left v -> CIR.ECall (const IEmpty <$> v) $ map ioToExpr (map Direct inputs) <> map ioToExpr (map Direct outputs) <> delayParams
  where
-  delayParams v =
+  delayParams =
     S.elems
       . S.map (\(_, s, _) -> case s of
         ExId Delay -> CIR.EVar . (<> ExId Delay) . Direct . head $ outputs
         _ -> CIR.EVar s)
-      . mconcat
-      . map (\Context{delayStorage} -> delayStorage)
-      . filter (\Context{from} -> v == from)
-      $ context
+      $ delayStorage
   ioToExpr io =
     if elem io pointers
       then CIR.EVar io
@@ -649,11 +646,11 @@ instance Synthesizable Process where
                 delayDefs = mconcat . map (\(Vertex {outputs = outs}, Context {delayStorage}) -> zipWith delayDef outs $ S.elems delayStorage) <$> delays
                 delayDef var (t, i, e) = (t, Direct var <> i, e)
                 subsysStorage = mconcat . mapMaybe (\Context{delayStorage, delay} -> if delay then Nothing else Just delayStorage) $ subsysNew
-                findVert vid = find (\Vertex{id = i} -> i == vid) vertices
+                findVert vid = find (\(Vertex{id = i}, _) -> i == vid) <$> vContext >>= id
                 schedVert = mapMaybe findVert <$> schedule
                 delaySigs' = map (\b -> Direct b <> ExId Delay) delaySigs
                 pointers = delaySigs' <> map Direct inputs <> map Direct outputs
-                schedStmts = map (CIR.SExpr . vertexToExpr pointers subsysNew) <$> schedVert
+                schedStmts = map (CIR.SExpr . vertexToExpr pointers) <$> schedVert
                 locals = S.filter (\v -> not (elem (Direct v) (pointers <> map Direct delaySigs))) . S.fromList . map (\(Edge v _ _) -> v) $ edges
                 localDefs = S.map ((\(t, s) -> CIR.SVarDecl t s Nothing) . (\(t, n) -> (removePoint t, n)) . varToCDef) locals
                 delayTmps = map (\(t, i) -> CIR.SVarDef (removePoint t) i Nothing (CIR.EDereference . CIR.EVar $ i <> ExId Delay)) delayTypes
