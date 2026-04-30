@@ -30,6 +30,7 @@ data IdExt
   = Name String
   | Input
   | Output
+  | Delay
   | Tmp
   | IVector
   | IMatrix
@@ -42,6 +43,7 @@ instance Pretty IdExt where
   pretty (Name s) = pretty s
   pretty Input = pretty "input"
   pretty Output = pretty "output"
+  pretty Delay = pretty "delay"
   pretty Tmp = pretty "tmp"
   pretty IVector = pretty "skepu::Vector"
   pretty IMatrix = pretty "skepu::Matrix"
@@ -168,7 +170,7 @@ vertexToExpr pointers context Vertex{id = _, ..} = case process of
   delayParams v =
     S.elems
       . S.map (\(_, s, _) -> case s of
-        ExId Tmp -> CIR.EVar . (<> ExId Tmp) . Direct . head $ outputs
+        ExId Delay -> CIR.EVar . (<> ExId Delay) . Direct . head $ outputs
         _ -> CIR.EVar s)
       . mconcat
       . map (\Context{delayStorage} -> delayStorage)
@@ -559,7 +561,7 @@ bodyToStatement inports outports = \case
             [ExId Input <> Ix 0, ExId Output <> Ix 0]
             (inports <> outports)
             <> zipWith (\i p -> (i, (fst p, delayExprToC e)))
-                [ExId Tmp]
+                [ExId Delay]
                 outports
         , delayBody
         )
@@ -581,8 +583,8 @@ bodyToStatement inports outports = \case
     -- current value of the delay, hence the shuffling of values.
     delayBody =
       CIR.SScope
-        [ CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 0) (CIR.EDereference . CIR.EVar $ ExId Tmp)
-        , CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Tmp) (CIR.EDereference . CIR.EVar $ ExId Input <> Ix 0)
+        [ CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 0) (CIR.EDereference . CIR.EVar $ ExId Delay)
+        , CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Delay) (CIR.EDereference . CIR.EVar $ ExId Input <> Ix 0)
         ]
 
 removePoint :: CIR.Type a -> CIR.Type a
@@ -642,16 +644,16 @@ instance Synthesizable Process where
                       )
                     $ delays
                 delayTypes = map varToCDef delaySigs
-                delayDefs = delayExprs >>= \_c -> Just $ ((\(t, v) e -> (t, v <> ExId Tmp, e)) <$> delayTypes) <*> _c
+                delayDefs = delayExprs >>= \_c -> Just $ ((\(t, v) e -> (t, v <> ExId Delay, e)) <$> delayTypes) <*> _c
                 subsysStorage = mconcat . mapMaybe (\Context{delayStorage, delay} -> if delay then Nothing else Just delayStorage) $ subsysNew
                 findVert vid = find (\Vertex{id = i} -> i == vid) vertices
                 schedVert = mapMaybe findVert <$> schedule
-                delaySigs' = map (\b -> Direct b <> ExId Tmp) delaySigs
+                delaySigs' = map (\b -> Direct b <> ExId Delay) delaySigs
                 pointers = delaySigs' <> map Direct inputs <> map Direct outputs
                 schedStmts = map (CIR.SExpr . vertexToExpr pointers subsysNew) <$> schedVert
                 locals = S.filter (\v -> not (elem (Direct v) (pointers <> map Direct delaySigs))) . S.fromList . map (\(Edge v _ _) -> v) $ edges
                 localDefs = S.map ((\(t, s) -> CIR.SVarDecl t s Nothing) . (\(t, n) -> (removePoint t, n)) . varToCDef) locals
-                delayTmps = map (\(t, i) -> CIR.SVarDef (removePoint t) i Nothing (CIR.EDereference . CIR.EVar $ i <> ExId Tmp)) delayTypes
+                delayTmps = map (\(t, i) -> CIR.SVarDef (removePoint t) i Nothing (CIR.EDereference . CIR.EVar $ i <> ExId Delay)) delayTypes
                 context =
                   Context
                     { from = binder
