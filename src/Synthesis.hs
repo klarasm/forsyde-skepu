@@ -228,6 +228,7 @@ resolveOp tmpix stmts [(t1, expr1), (t2, expr2)] tout = \case
   "quot" -> (tmpix, stmts, (tout, CIR.EBinOp CIR.Divide e1 e2))
   "/" -> (tmpix, stmts, (tout, CIR.EBinOp CIR.Divide e1 e2))
   "div" -> error "Haskell `div` rounds to negative infinity, not implemented. Consider using `quot`"
+  "const" -> (tmpix, stmts, (tout, e1))
   u -> error $ "Unknown binary function: " <> u
  where
   e1 = derefArg (needDeref 0 (t1, tout)) expr1
