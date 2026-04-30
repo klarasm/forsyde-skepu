@@ -21,7 +21,6 @@ import GHC.Utils.Outputable (showPprUnsafe)
 
 import qualified CIR
 import Data.List (find)
-import qualified Data.Map as M
 import Data.Maybe (mapMaybe)
 import qualified Data.Set as S
 import IR
@@ -235,7 +234,7 @@ resolveOp tmpix stmts [(t1, expr1), (t2, expr2)] tout = \case
   e2 = derefArg (needDeref 0 (t2, tout)) expr2
 resolveOp _ _ _ _ = undefined
 
-exprToLambda :: Int -> OutputLoc -> M.Map (Id IdExt) (CType, CExpression) -> [CType] -> CType -> [(CType, Id IdExt)] -> [(CType, Id IdExt)] -> CoreExpr -> (Int, [CStatement], (CType, CExpression))
+exprToLambda :: Int -> OutputLoc -> [((Id IdExt), (CType, CExpression))] -> [CType] -> CType -> [(CType, Id IdExt)] -> [(CType, Id IdExt)] -> CoreExpr -> (Int, [CStatement], (CType, CExpression))
 exprToLambda tmpix outLoc args tin tout inports outports expr = case expr of
   -- A function passed as a value (with type constraints). Construct a lambda
   App (App (Var f) t1) t2
@@ -252,7 +251,7 @@ exprToLambda tmpix outLoc args tin tout inports outports expr = case expr of
           _ -> undefined
   App (App (App (Var f) t1) t2) v1@(Var v)
     | typeOrConstraint t1 && typeOrConstraint t2 && (not $ typeOrConstraint v1) ->
-        case (makePorts . extractTypes [] . varType $ f, M.lookup (Direct v) args) of
+        case (makePorts . extractTypes [] . varType $ f, lookup (Direct v) args) of
           -- A partially applied binary function, construct a lambda. Note that
           -- SkePU does not use variable capture, but instead passes it as a
           -- scalar.
@@ -267,31 +266,31 @@ exprToLambda tmpix outLoc args tin tout inports outports expr = case expr of
           _ -> undefined
   e@(Lam _ _) ->
     let (b1, e1) = collectBinders e
-        args' = M.fromList . zipWith varToArgMap b1 $ inputIds
+        args' = zipWith varToArgMap b1 $ inputIds
         varToArgMap v i = (Direct v, (varToCType v, CIR.EVar i))
     in exprToLambda tmpix outLoc (args' <> args) tin tout inports outports e1
   e ->
     -- As mentioned above, SkePU does not use lambda variable capture, instead
     -- all scalar values are passed as arguments. Rename the input arguments so
     -- the expression resolves correctly.
-    let (_, args') = M.mapAccum (\ix (t', _) -> (ix+1, (removePoint t', CIR.EVar $ ExId Input <> Ix ix))) 0 $ args
+    let args' = zipWith (\ix ((i, (t', _))) -> (i, (removePoint t', CIR.EVar $ ExId Input <> Ix ix))) [0..] $ args
         (tmpix1, stmts1, (_, expr1)) = exprToCExpr tmpix outLoc args' tin tout inputs outports e
         inputs = zip tin inputIds
         expr2 = CIR.ELambda [] inputs $ CIR.SScope [CIR.SReturn $ Just expr1]
      in (tmpix1, stmts1, (tout, expr2))
 
 -- | Apply a skeleton instance to its arguments
-skelAppToCExpr :: Int -> OutputLoc -> M.Map (Id IdExt) (CType, CExpression) -> [CStatement] -> [CType] -> CType -> [(CType, b2)] -> Id IdExt -> CExpression -> (Int, [CStatement], (CType, CExpression))
+skelAppToCExpr :: Int -> OutputLoc -> [((Id IdExt), (CType, CExpression))] -> [CStatement] -> [CType] -> CType -> [(CType, b2)] -> Id IdExt -> CExpression -> (Int, [CStatement], (CType, CExpression))
 skelAppToCExpr tmpix1 ret args stmts1 tin tout inports skel e1' =
   let (tmpix2, outname) = mkTemp tmpix1
       (tmpix3, skelInstance) = mkTemp tmpix2
-      inputs = zipWith3 derefTo tin (map fst inports) (map snd $ M.elems args)
+      inputs = zipWith3 derefTo tin (map fst inports) (map (snd . snd) args)
       ini = case tout of
         CIR.TConstructor _ _ ->
           Just
             [ CIR.ECallExpr
                 ( CIR.EMemberAccess
-                    (derefTo CIR.TVoid (fst . head $ inports) $ snd . head $ M.elems args)
+                    (derefTo CIR.TVoid (fst . head $ inports) $ snd . snd . head $ args)
                     (ExId $ Name "size")
                 )
                 []
@@ -316,7 +315,7 @@ skelAppToCExpr tmpix1 ret args stmts1 tin tout inports skel e1' =
           Return -> (tout, call)
       )
 
-exprToCExpr :: Int -> OutputLoc -> M.Map (Id IdExt) (CType, CExpression) -> [CType] -> CType -> [(CType, Id IdExt)] -> [(CType, Id IdExt)] -> CoreExpr -> (Int, [CStatement], (CType, CExpression))
+exprToCExpr :: Int -> OutputLoc -> [((Id IdExt), (CType, CExpression))] -> [CType] -> CType -> [(CType, Id IdExt)] -> [(CType, Id IdExt)] -> CoreExpr -> (Int, [CStatement], (CType, CExpression))
 exprToCExpr tmpix outLoc args tin tout inports outports expr = case expr of
   -- Inner function applied to a function and a var
   App (App (App (App (Var inner) t1) t2) e1) e2@(Var v)
@@ -370,7 +369,7 @@ exprToCExpr tmpix outLoc args tin tout inports outports expr = case expr of
           Nothing -> undefined
   -- Unary operator/function (with type variables)
   App (App (Var f) t) (Var v) | typeOrConstraint t && (not $ typeOrConstraint $ Var v) ->
-    case M.lookup (Direct v) args of
+    case lookup (Direct v) args of
       Just (argty, arg) ->
         (tmpix, [], (tout, CIR.ECall (Direct f) [arg]))
       Nothing -> error $ "Var not in args! " <> showPprUnsafe expr
@@ -385,7 +384,7 @@ exprToCExpr tmpix outLoc args tin tout inports outports expr = case expr of
   -- A binary operator passed as a value. Apply it to the input arguments
   App (App (Var f) t1) t2
     | typeOrConstraint t1 && typeOrConstraint t2 ->
-        resolveOp tmpix [] (take 2 $ M.elems args) tout $ getOccString f
+        resolveOp tmpix [] (take 2 . map snd $ args) tout $ getOccString f
   -- An integer literal
   App _ (Lit (LitNumber _ i)) -> (tmpix, [], (CIR.TLong, CIR.EInt $ fromIntegral i))
   Lit (LitNumber _ i) -> (tmpix, [], (CIR.TLong, CIR.EInt $ fromIntegral i))
@@ -393,7 +392,7 @@ exprToCExpr tmpix outLoc args tin tout inports outports expr = case expr of
   Lit (LitFloat f) -> (tmpix, [], (CIR.TFloat, CIR.EFloat $ fromRational f))
   App _ (Lit (LitDouble f)) -> (tmpix, [], (CIR.TDouble, CIR.EFloat $ fromRational f))
   Lit (LitDouble f) -> (tmpix, [], (CIR.TDouble, CIR.EFloat $ fromRational f))
-  Var v -> case M.lookup (Direct v) args of
+  Var v -> case lookup (Direct v) args of
     Just (t', v') -> (tmpix, [], (tout, derefTo tout t' v'))
     -- Assume the Var is a function
     -- TODO: need to rethink multiple output
@@ -427,18 +426,19 @@ derefTo :: CIR.Type a1 -> CIR.Type a2 -> CIR.Expression a -> CIR.Expression a
 derefTo outty inty = derefArg (needDeref 0 (inty, outty))
 
 -- | Make an argument map, from args if existent otherwise from ports
-makeMap :: (Ord a, Eq a2) => [CoreBndr] -> [(a2, Id a)] -> M.Map (Id a) (a2, CIR.Expression a)
+makeMap :: (Ord a, Eq a2) => [CoreBndr] -> [(a2, Id a)] -> [((Id a), (a2, CIR.Expression a))]
 makeMap args ports =
-  case M.fromList $ zipWith (\b (t, _) -> (Direct b, (t, CIR.EVar (Direct b)))) args ports of
+  case zipWith (\b (t, _) -> (Direct b, (t, CIR.EVar (Direct b)))) args ports of
     m
       | m == mempty ->
-          M.fromList $ map (\(t, n) -> (n, (t, CIR.EVar n))) ports
+          map (\(t, n) -> (n, (t, CIR.EVar n))) ports
       | otherwise -> m
 
-makeComb :: [(CType, Id IdExt)] -> [(CType, Id IdExt)] -> [CoreExpr] -> Expr CoreBndr -> (OutputLoc, M.Map (Id IdExt) (CType, CExpression), CStatement)
+makeComb :: [(CType, Id IdExt)] -> [(CType, Id IdExt)] -> [CoreExpr] -> Expr CoreBndr -> (OutputLoc, [((Id IdExt), (CType, CExpression))], CStatement)
 makeComb inports outports tys e =
   let (args, expr) = collectBinders e
       argMap = makeMap args inports
+      outArgs = makeMap [] outports
    in case expr of
         App (App (App (App (App (App (App (App (Var v') te1) te2) te3) te4) e1) e2) e3) e4
           | getOccString v' == "(,,,)" ->
@@ -451,7 +451,7 @@ makeComb inports outports tys e =
                   (cntr2, init3, (_, ea3)) = exprToCExpr cntr1 FunArg argMap (map exprToCType tys) tout3 inports outports e3
                   (_, init4, (_, ea4)) = exprToCExpr cntr2 FunArg argMap (map exprToCType tys) tout4 inports outports e4
                in ( FunArg
-                  , argMap
+                  , argMap <> outArgs
                   , CIR.SScope $
                       init1
                         <> init2
@@ -472,7 +472,7 @@ makeComb inports outports tys e =
                   (cntr1, init2, (_, ea2)) = exprToCExpr cntr FunArg argMap (map exprToCType tys) tout2 inports outports e2
                   (_, init3, (_, ea3)) = exprToCExpr cntr1 FunArg argMap (map exprToCType tys) tout3 inports outports e3
                in ( FunArg
-                  , argMap
+                  , argMap <> outArgs
                   , CIR.SScope $
                       init1
                         <> init2
@@ -489,7 +489,7 @@ makeComb inports outports tys e =
                   (cntr, init1, (_, ea1)) = exprToCExpr 0 FunArg argMap (map exprToCType tys) tout1 inports outports e1
                   (_, init2, (_, ea2)) = exprToCExpr cntr FunArg argMap (map exprToCType tys) tout2 inports outports e2
                in ( FunArg
-                  , argMap
+                  , argMap <> outArgs
                   , CIR.SScope $
                       init1
                         <> init2
@@ -501,13 +501,13 @@ makeComb inports outports tys e =
             let tout1 = exprToCType $ last tys
                 (_, init1, (_, ea1)) = exprToCExpr 0 FunArg argMap (map exprToCType $ init tys) tout1 inports outports expr
              in ( FunArg
-                , argMap
+                , argMap <> outArgs
                 , CIR.SScope $
                     init1
                       <> [ CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 0) ea1 ]
                 )
 
-bodyToStatement :: [(CType, Id IdExt)] -> [(CType, Id IdExt)] -> CoreExpr -> (OutputLoc, M.Map (Id IdExt) (CType, CExpression), CStatement)
+bodyToStatement :: [(CType, Id IdExt)] -> [(CType, Id IdExt)] -> CoreExpr -> (OutputLoc, [((Id IdExt), (CType, CExpression))], CStatement)
 bodyToStatement inports outports = \case
   App (App (App (App (App (App (App (App (App (App (App (App (App (Var v) t1) t2) t3) t4) t5) t6) t7) t8) t9) t10) t11) t12) e
     | getOccString v == "comb84" -> makeComb inports outports [t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11, t12] e
@@ -555,7 +555,12 @@ bodyToStatement inports outports = \case
   App (App (Var v) t) e
     | typeOrConstraint t && getOccString v == "delay" ->
         ( FunArg
-        , M.fromList [(ExId Input <> Ix 0, (fst . head $ inports, CIR.EVar $ ExId Input <> Ix 0))]
+        , zipWith (\i p -> (i, (fst p, CIR.EVar i)))
+            [ExId Input <> Ix 0, ExId Output <> Ix 0]
+            (inports <> outports)
+            <> zipWith (\i p -> (i, (fst p, delayExprToC e)))
+                [ExId Tmp]
+                outports
         , delayBody
         )
   -- Might be a regular function, i.e. not a process
@@ -596,26 +601,24 @@ instance Synthesizable Process where
             let inputs = zip (map portToC inports) inputIds
                 outputs = zip (map portToC outports) outputIds
                 (retLoc, argMap, body') = bodyToStatement inputs outputs body
-                delayExpr = case body of
-                  App (App (Var v) _) e
-                    | isDelayVar v -> Just $ delayExprToC e
-                  _ -> Nothing
+                delay = length argMap > length inputs + length outputs
+                argToDef (k, (t, _)) = (t, k)
                 context =
                   Context
                     { from = binder
                     , ret = case retLoc of
                         FunArg -> CIR.TVoid
                         Return -> fst . head $ outputs
-                    , inputs = map (\(k, (t, _)) -> (t, k) ) . M.toList $ argMap
+                    , inputs = map argToDef . take (length inports) $ argMap
                     , outputs = case retLoc of
-                        FunArg -> outputs
+                        FunArg -> map argToDef . take (length outports) . drop (length inports) $ argMap
                         Return -> mempty
-                    , delayStorage = case delayExpr of
-                      Just e -> S.singleton (fst . head $ outputs, ExId Tmp, e)
-                      _ -> mempty
-                    , delay = case delayExpr of
-                      Just _ -> True
-                      Nothing -> False
+                    , delayStorage =
+                        S.fromList
+                          . map (\(i', (t', e')) -> (t', i', e'))
+                          . drop (length inports + length outports)
+                          $ argMap
+                    , delay
                     , body = body'
                     }
              in (context : newC, context : allC)
