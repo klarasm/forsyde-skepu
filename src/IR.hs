@@ -461,7 +461,7 @@ procsFromId var = filter (\Process{binder} -> binder == (const () <$> var))
 
 isDelayVertex :: [Vertex] -> Int -> Bool
 isDelayVertex vertices vid =
-  case mapMaybe delayVertex . filter (\Vertex{id = i} -> i == vid) $ vertices of
+  case filter (\Vertex{id = i, delay} -> i == vid && delay) $ vertices of
     _ : [] -> True
     _ -> False
 
