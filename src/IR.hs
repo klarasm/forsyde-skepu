@@ -20,7 +20,6 @@ module IR (
   isDelayVar,
   typeOrConstraint,
   delayVertex,
-  delayProc,
   procsFromId,
   vertexProcs,
   stripLams,
@@ -470,13 +469,6 @@ delayVertex v@Vertex {delay} =
   if delay
     then Just v
     else Nothing
-
-delayProc :: [Process] -> Vertex -> [Process]
-delayProc processes = \case
-  Vertex{process = Right proc} ->
-    if isDelayProcess proc then [proc] else []
-  Vertex{process = Left var} ->
-    filter isDelayProcess . procsFromId var $ processes
 
 isDelayVar :: Var -> Bool
 isDelayVar v =
