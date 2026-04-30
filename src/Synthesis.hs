@@ -269,23 +269,27 @@ exprToLambda tmpix outLoc args tin tout inports outports expr = case expr of
         varToArgMap v i = (Direct v, (varToCType v, CIR.EVar i))
     in exprToLambda tmpix outLoc (args' <> args) tin tout inports outports e1
   e ->
-    let (tmpix1, stmts1, (_, expr1)) = exprToCExpr tmpix outLoc (M.map (\(t', e') -> (removePoint t', e')) args) tin tout inputs outports e
+    -- As mentioned above, SkePU does not use lambda variable capture, instead
+    -- all scalar values are passed as arguments. Rename the input arguments so
+    -- the expression resolves correctly.
+    let (_, args') = M.mapAccum (\ix (t', _) -> (ix+1, (removePoint t', CIR.EVar $ ExId Input <> Ix ix))) 0 $ args
+        (tmpix1, stmts1, (_, expr1)) = exprToCExpr tmpix outLoc args' tin tout inputs outports e
         inputs = zip tin inputIds
         expr2 = CIR.ELambda [] inputs $ CIR.SScope [CIR.SReturn $ Just expr1]
      in (tmpix1, stmts1, (tout, expr2))
 
--- Horrible, should trim arguments
-skelAppToCExpr :: Int -> OutputLoc -> p1 -> [CStatement] -> [CType] -> CType -> [(CType, b2)] -> p2 -> Id IdExt -> CExpression -> (Int, [CStatement], (CType, CExpression))
-skelAppToCExpr tmpix1 ret args stmts1 tin tout inports outports skel e1' =
+-- | Apply a skeleton instance to its arguments
+skelAppToCExpr :: Int -> OutputLoc -> M.Map (Id IdExt) (CType, CExpression) -> [CStatement] -> [CType] -> CType -> [(CType, b2)] -> Id IdExt -> CExpression -> (Int, [CStatement], (CType, CExpression))
+skelAppToCExpr tmpix1 ret args stmts1 tin tout inports skel e1' =
   let (tmpix2, outname) = mkTemp tmpix1
       (tmpix3, skelInstance) = mkTemp tmpix2
-      inputs = zipWith (derefTo CIR.TVoid) (map fst inports) inputArgs
+      inputs = zipWith3 derefTo tin (map fst inports) (map snd $ M.elems args)
       ini = case tout of
         CIR.TConstructor _ _ ->
           Just
             [ CIR.ECallExpr
                 ( CIR.EMemberAccess
-                    (derefTo CIR.TVoid (fst . head $ inports) $ head inputArgs)
+                    (derefTo CIR.TVoid (fst . head $ inports) $ snd . head $ M.elems args)
                     (ExId $ Name "size")
                 )
                 []
@@ -295,7 +299,7 @@ skelAppToCExpr tmpix1 ret args stmts1 tin tout inports outports skel e1' =
         CIR.ECall skelInstance $
           case ret of
             FunArg -> [CIR.EVar outname] <> inputs
-            Return -> [CIR.EDereference $ CIR.EVar $ ExId Input <> Ix 0]
+            Return -> inputs
       stmts =
         [ CIR.SVarDecl tout outname ini
         , CIR.SVarDef CIR.TAuto skelInstance Nothing $ CIR.ECall skel [e1']
@@ -318,7 +322,7 @@ exprToCExpr tmpix outLoc args tin tout inports outports expr = case expr of
         case skelToSkePU $ getOccString inner of
           Just (ret, skel) ->
             let (tmpix1, stmts1, (_, e1')) = exprToLambda tmpix ret args [exprToCType t1, exprToCType t2] tout inports outports e1
-             in skelAppToCExpr tmpix1 ret args stmts1 tin tout inports outports skel e1'
+             in skelAppToCExpr tmpix1 ret args stmts1 tin tout inports skel e1'
           Nothing ->
             let (tmpix1, stmts1, (t1', expr1)) = exprToCExpr tmpix FunArg args tin (exprToCType t1) inports outports e1
                 (tmpix2, stmts2, (t2', expr2)) = exprToCExpr tmpix1 FunArg args tin (exprToCType t2) inports outports e2
@@ -335,7 +339,7 @@ exprToCExpr tmpix outLoc args tin tout inports outports expr = case expr of
         case skelToSkePU (getOccString f) of
           Just (ret, skel) ->
             let (tmpix1, stmts1, (_, e1')) = exprToLambda tmpix ret args [exprToCType t1, exprToCType t2] (exprToCType t3) inports outports e1
-             in skelAppToCExpr tmpix1 ret args stmts1 tin tout inports outports skel e1'
+             in skelAppToCExpr tmpix1 ret args stmts1 tin tout inports skel e1'
           -- A little weird
           Nothing ->
             let (tmpix1, stmts1, (t1', expr1)) = exprToCExpr tmpix FunArg args tin (varToCType v1) inports outports e1
@@ -346,7 +350,7 @@ exprToCExpr tmpix outLoc args tin tout inports outports expr = case expr of
         case skelToSkePU (getOccString f) of
           Just (ret, skel) ->
             let (tmpix1, stmts1, (_, e1')) = exprToLambda tmpix ret args [exprToCType t1, exprToCType t2] (exprToCType t3) inports outports e1
-             in skelAppToCExpr tmpix1 ret args stmts1 tin tout inports outports skel e1'
+             in skelAppToCExpr tmpix1 ret args stmts1 tin tout inports skel e1'
           Nothing -> error . showPprUnsafe $ e1
   -- A partially applied binary operator passed as a value. Apply it to the input argument
   App (App (App (Var f) t1) t2) e
@@ -360,7 +364,7 @@ exprToCExpr tmpix outLoc args tin tout inports outports expr = case expr of
         case skelToSkePU (getOccString inner) of
           Just (ret, skel) ->
             let (tmpix1, stmts1, (_, e1')) = exprToLambda tmpix ret args [varToCType v] (exprToCType t1) inports outports e
-             in skelAppToCExpr tmpix1 ret args stmts1 tin tout inports outports skel e1'
+             in skelAppToCExpr tmpix1 ret args stmts1 tin tout inports skel e1'
           Nothing -> undefined
   -- Unary operator/function (with type variables)
   App (App (Var f) t) (Var v) | typeOrConstraint t && (not $ typeOrConstraint $ Var v) ->
@@ -375,7 +379,7 @@ exprToCExpr tmpix outLoc args tin tout inports outports expr = case expr of
           Nothing -> error $ "Unknown skeleton: " <> getOccString inner
           Just (ret, skel) ->
             let (tmpix1, stmts1, (_, e1')) = exprToLambda tmpix ret args tin tout inports outports e
-             in skelAppToCExpr tmpix1 ret args stmts1 tin tout inports outports skel e1'
+             in skelAppToCExpr tmpix1 ret args stmts1 tin tout inports skel e1'
   -- A binary operator passed as a value. Apply it to the input arguments
   App (App (Var f) t1) t2
     | typeOrConstraint t1 && typeOrConstraint t2 ->
@@ -421,15 +425,15 @@ derefTo :: CIR.Type a1 -> CIR.Type a2 -> CIR.Expression a -> CIR.Expression a
 derefTo outty inty = derefArg (needDeref 0 (inty, outty))
 
 -- | Make an argument map, from args if existent otherwise from ports
-makeMap :: (Ord a1, Eq a2, Eq a3) => [CoreBndr] -> [(a2, Id a3)] -> M.Map (Id a1) (a2, CIR.Expression a3)
+makeMap :: (Ord a, Eq a2) => [CoreBndr] -> [(a2, Id a)] -> M.Map (Id a) (a2, CIR.Expression a)
 makeMap args ports =
-  case M.fromList $ zipWith (\b (t, n) -> (Direct b, (t, CIR.EVar n))) args ports of
+  case M.fromList $ zipWith (\b (t, _) -> (Direct b, (t, CIR.EVar (Direct b)))) args ports of
     m
       | m == mempty ->
-          M.fromList $ zipWith (\ix (t, n) -> (Ix ix, (t, CIR.EVar n))) [0 ..] ports
+          M.fromList $ map (\(t, n) -> (n, (t, CIR.EVar n))) ports
       | otherwise -> m
 
-makeComb :: [(CType, Id IdExt)] -> [(CType, Id IdExt)] -> [CoreExpr] -> Expr CoreBndr -> (OutputLoc, CIR.Statement IdExt)
+makeComb :: [(CType, Id IdExt)] -> [(CType, Id IdExt)] -> [CoreExpr] -> Expr CoreBndr -> (OutputLoc, M.Map (Id IdExt) (CType, CExpression), CStatement)
 makeComb inports outports tys e =
   let (args, expr) = collectBinders e
       argMap = makeMap args inports
@@ -445,6 +449,7 @@ makeComb inports outports tys e =
                   (cntr2, init3, (_, ea3)) = exprToCExpr cntr1 FunArg argMap (map exprToCType tys) tout3 inports outports e3
                   (_, init4, (_, ea4)) = exprToCExpr cntr2 FunArg argMap (map exprToCType tys) tout4 inports outports e4
                in ( FunArg
+                  , argMap
                   , CIR.SScope $
                       init1
                         <> init2
@@ -465,6 +470,7 @@ makeComb inports outports tys e =
                   (cntr1, init2, (_, ea2)) = exprToCExpr cntr FunArg argMap (map exprToCType tys) tout2 inports outports e2
                   (_, init3, (_, ea3)) = exprToCExpr cntr1 FunArg argMap (map exprToCType tys) tout3 inports outports e3
                in ( FunArg
+                  , argMap
                   , CIR.SScope $
                       init1
                         <> init2
@@ -481,6 +487,7 @@ makeComb inports outports tys e =
                   (cntr, init1, (_, ea1)) = exprToCExpr 0 FunArg argMap (map exprToCType tys) tout1 inports outports e1
                   (_, init2, (_, ea2)) = exprToCExpr cntr FunArg argMap (map exprToCType tys) tout2 inports outports e2
                in ( FunArg
+                  , argMap
                   , CIR.SScope $
                       init1
                         <> init2
@@ -492,12 +499,13 @@ makeComb inports outports tys e =
             let tout1 = exprToCType $ last tys
                 (_, init1, (_, ea1)) = exprToCExpr 0 FunArg argMap (map exprToCType $ init tys) tout1 inports outports expr
              in ( FunArg
+                , argMap
                 , CIR.SScope $
                     init1
                       <> [ CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 0) ea1 ]
                 )
 
-bodyToStatement :: [(CType, Id IdExt)] -> [(CType, Id IdExt)] -> CoreExpr -> (OutputLoc, CStatement)
+bodyToStatement :: [(CType, Id IdExt)] -> [(CType, Id IdExt)] -> CoreExpr -> (OutputLoc, M.Map (Id IdExt) (CType, CExpression), CStatement)
 bodyToStatement inports outports = \case
   App (App (App (App (App (App (App (App (App (App (App (App (App (Var v) t1) t2) t3) t4) t5) t6) t7) t8) t9) t10) t11) t12) e
     | getOccString v == "comb84" -> makeComb inports outports [t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11, t12] e
@@ -553,9 +561,12 @@ bodyToStatement inports outports = \case
   App (App (App (Var v) t1) t2) e
     | getOccString v == "comb11" -> makeComb inports outports [t1, t2]  e
     | otherwise -> error $ "3App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
-  App (App (Var v) _) e
-    | getOccString v == "delay" ->
-        (FunArg, delayBody)
+  App (App (Var v) t) e
+    | typeOrConstraint t && getOccString v == "delay" ->
+        ( FunArg
+        , M.fromList [(ExId Input <> Ix 0, (fst . head $ inports, CIR.EVar $ ExId Input <> Ix 0))]
+        , delayBody
+        )
     | otherwise -> error $ "2App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
   App (Var v) e -> error $ "1App(" <> show (Direct v :: Id ()) <> "): " <> showPprUnsafe e
   -- Might be a regular function, i.e. not a process
@@ -564,6 +575,7 @@ bodyToStatement inports outports = \case
         argMap = makeMap args inports
         (_, stmts, (_, expr)) = exprToCExpr 0 Return argMap (map fst inports) (fst . head $ outports) inports outports expr'
      in ( Return
+        , argMap
         , CIR.SScope $
             stmts
               <> [CIR.SReturn . Just $ expr]
@@ -594,7 +606,7 @@ instance Synthesizable Process where
           Nothing ->
             let inputs = zip (map portToC inports) inputIds
                 outputs = zip (map portToC outports) outputIds
-                (retLoc, body') = bodyToStatement inputs outputs body
+                (retLoc, argMap, body') = bodyToStatement inputs outputs body
                 delayExpr = case body of
                   App (App (Var v) _) e
                     | isDelayVar v -> Just $ delayExprToC e
@@ -605,7 +617,7 @@ instance Synthesizable Process where
                     , ret = case retLoc of
                         FunArg -> CIR.TVoid
                         Return -> fst . head $ outputs
-                    , inputs
+                    , inputs = map (\(k, (t, _)) -> (t, k) ) . M.toList $ argMap
                     , outputs = case retLoc of
                         FunArg -> outputs
                         Return -> mempty

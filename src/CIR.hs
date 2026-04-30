@@ -398,7 +398,7 @@ instance (Pretty a) => Pretty (Global a) where
       pretty storageClass
         <+> pretty returnType
         <+> pretty funcId
-        <+> (parens . hsep . punctuate comma . map prettyParam) parameters
+        <> (parens . hsep . punctuate comma . map prettyParam) parameters
         <> semi
     GFuncDeclare Nothing returnType funcId parameters ->
       pretty returnType
