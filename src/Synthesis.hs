@@ -49,10 +49,10 @@ instance Pretty IdExt where
   pretty Reduce = pretty "skepu::Reduce"
   pretty Map = pretty "skepu::Map"
 
-type CType = CIR.Type IdExt
-type CExpression = CIR.Expression IdExt
-type CStatement = CIR.Statement IdExt
-type CProgram = CIR.Program IdExt
+type CType = CIR.Type (Id IdExt)
+type CExpression = CIR.Expression (Id IdExt)
+type CStatement = CIR.Statement (Id IdExt)
+type CProgram = CIR.Program (Id IdExt)
 
 data (Show a) => Context a = Context
   { from :: Id ()
@@ -426,7 +426,7 @@ derefTo :: CIR.Type a1 -> CIR.Type a2 -> CIR.Expression a -> CIR.Expression a
 derefTo outty inty = derefArg (needDeref 0 (inty, outty))
 
 -- | Make an argument map, from args if existent otherwise from ports
-makeMap :: (Ord a, Eq a2) => [CoreBndr] -> [(a2, Id a)] -> [((Id a), (a2, CIR.Expression a))]
+makeMap :: (Ord a, Eq a2) => [CoreBndr] -> [(a2, Id a)] -> [((Id a), (a2, CIR.Expression (Id a)))]
 makeMap args ports =
   case zipWith (\b (t, _) -> (Direct b, (t, CIR.EVar (Direct b)))) args ports of
     m

@@ -112,7 +112,7 @@ data Type a
   | TFloat
   | TDouble
   | TChar
-  | TIdent (IR.Id a)
+  | TIdent a
   | TPointer (Type a)
   | TReference (Type a)
   | TFunctionPointer (Type a) [(Type a)]
@@ -120,59 +120,125 @@ data Type a
   | TConstructor (Type a) (Type a)
   | TAuto
   deriving (Eq, Ord, Show)
+instance Functor Type where
+  fmap f = \case
+    TVoid -> TVoid
+    TInt -> TInt
+    TLong -> TLong
+    TSizeT -> TSizeT
+    TFloat -> TFloat
+    TDouble -> TDouble
+    TChar -> TChar
+    TIdent n -> TIdent (f n)
+    TPointer t -> TPointer (f <$> t)
+    TReference t -> TReference (f <$> t)
+    TFunctionPointer retTy argTy -> TFunctionPointer (f <$> retTy) (map (fmap f) argTy)
+    TQualifiedType qual t -> TQualifiedType qual (f <$> t)
+    TConstructor constrTy innerTy -> TConstructor (f <$> constrTy) (f <$> innerTy)
+    TAuto -> TAuto
 
 data Expression a
-  = EVar (IR.Id a)
+  = EVar a
   | EInt Int
   | EFloat Float
   | EChar Char
   | EString String
   | EBinOp BinaryOperator (Expression a) (Expression a)
   | EUnOp UnaryOperator (Expression a)
-  | ECall (IR.Id a) [(Expression a)]
+  | ECall a [(Expression a)]
   | ECallExpr (Expression a) [(Expression a)]
   | EArrayAccess (Expression a) (Expression a)
   | EReference (Expression a)
   | EDereference (Expression a)
-  | EMemberAccess (Expression a) (IR.Id a)
-  | EPointerAccess (Expression a) (IR.Id a)
+  | EMemberAccess (Expression a) (a)
+  | EPointerAccess (Expression a) (a)
   | EParen (Expression a)
   | EStatement [(Statement a)] (Expression a)
-  | ELambda [(IR.Id a)] [((Type a), (IR.Id a))] (Statement a)
+  | ELambda [(a)] [((Type a), (a))] (Statement a)
   deriving (Eq, Ord, Show)
+instance Functor Expression where
+  fmap f = \case
+    EVar i -> EVar $ f i
+    EInt l -> EInt l
+    EFloat l -> EFloat l
+    EChar c -> EChar c
+    EString s -> EString s
+    EBinOp op e1 e2 -> EBinOp op (f <$> e1) (f <$> e2)
+    EUnOp op e -> EUnOp op (f <$> e)
+    ECall name args -> ECall (f name) (map (fmap f) args)
+    ECallExpr name args -> ECallExpr (f <$> name) (map (fmap f) args)
+    EArrayAccess name ix -> EArrayAccess (f <$> name) (f <$> ix)
+    EReference e -> EReference $ f <$> e
+    EDereference e -> EDereference $ f <$> e
+    EMemberAccess name field -> EMemberAccess (f <$> name) (f field)
+    EPointerAccess name field -> EPointerAccess (f <$> name) (f field)
+    EParen e -> EParen (f <$> e)
+    EStatement stmts expr -> EStatement (map (fmap f) stmts) (f <$> expr)
+    ELambda capture parms stmt -> ELambda (map f capture) (map (parmFmap f) parms) (f <$> stmt)
 
 data Statement a
   = SExpr (Expression a)
-  | SVarDecl (Type a) (IR.Id a) (Maybe [Expression a])
-  | SVarDef (Type a) (IR.Id a) (Maybe [Expression a]) (Expression a)
+  | SVarDecl (Type a) a (Maybe [Expression a])
+  | SVarDef (Type a) a (Maybe [Expression a]) (Expression a)
   | SAssign (Expression a) (Expression a)
-  | SVarAssign (IR.Id a) (Expression a)
-  | SArrayDecl (Type a) (IR.Id a) [(Expression a)]
-  | SArrayAssign (IR.Id a) (Expression a) (Expression a)
+  | SVarAssign (a) (Expression a)
+  | SArrayDecl (Type a) a [(Expression a)]
+  | SArrayAssign a (Expression a) (Expression a)
   | SScope [(Statement a)]
   | SIf (Expression a) (Statement a) (Maybe (Statement a))
   | SWhile (Expression a) (Statement a)
   | SFor (Statement a) (Expression a) (Statement a) (Statement a)
   | SBreak
   | SReturn (Maybe (Expression a))
-  | SGoto (IR.Id a)
-  | SLabel (IR.Id a)
-  | SStream (IR.Id a) Bool [Expression a]
+  | SGoto a
+  | SLabel a
+  | SStream a Bool [Expression a]
   deriving (Eq, Ord, Show)
+instance Functor Statement where
+  fmap f = \case
+    SExpr e -> SExpr (f <$> e)
+    SVarDecl t n ini -> SVarDecl (f <$> t) (f n) (map (fmap f) <$> ini)
+    SVarDef t n ini e -> SVarDef (f <$> t) (f n) (map (fmap f) <$> ini) (f <$> e)
+    SAssign evar expr -> SAssign (f <$> evar) (f <$> expr)
+    SVarAssign v expr -> SVarAssign (f v) (f <$> expr)
+    SArrayDecl t n dim -> SArrayDecl (f <$> t) (f n) (map (fmap f) dim)
+    SArrayAssign n ix expr -> SArrayAssign (f n) (f <$> ix) (f <$> expr)
+    SScope stmts -> SScope (map (fmap f) stmts)
+    SIf cond ethen eelse -> SIf (f <$> cond) (f <$> ethen) (fmap (fmap f) eelse)
+    SWhile cond body -> SWhile (f <$> cond) (f <$> body)
+    SFor ini cond post body -> SFor (f <$> ini) (f <$> cond) (f <$> post) (f <$> body)
+    SBreak -> SBreak
+    SReturn ret -> SReturn $ fmap (fmap f) ret
+    SGoto n -> SGoto $ f n
+    SLabel n -> SLabel $ f n
+    SStream n dir exprs -> SStream (f n) dir (map (fmap f) exprs)
 
 data Global a
-  = GFuncDeclare (Maybe StorageClass) (Type a) (IR.Id a) [((Type a), (IR.Id a))]
-  | GFuncDef (Maybe StorageClass) (Type a) (IR.Id a) [((Type a), (IR.Id a))] (Statement a)
-  | GVarDeclare (Type a) (IR.Id a)
-  | GVarDef (Type a) (IR.Id a) (Expression a)
-  | GStruct (IR.Id a) [((Type a), (IR.Id a))]
-  | GMacro (IR.Id a) [(IR.Id a)]
+  = GFuncDeclare (Maybe StorageClass) (Type a) a [(Type a, a)]
+  | GFuncDef (Maybe StorageClass) (Type a) (a) [(Type a, a)] (Statement a)
+  | GVarDeclare (Type a) a
+  | GVarDef (Type a) a (Expression a)
+  | GStruct a [(Type a, a)]
+  | GMacro a [a]
   deriving (Eq, Ord, Show)
+instance Functor Global where
+  fmap f = \case
+    GFuncDeclare sc t n parms -> GFuncDeclare sc (f <$> t) (f n) (map (parmFmap f) parms)
+    GFuncDef sc t n parms stmt -> GFuncDef sc (f <$> t) (f n) (map (parmFmap f) parms) (f <$> stmt)
+    GVarDeclare t n -> GVarDeclare (f <$> t) (f n)
+    GVarDef t n e -> GVarDef (f <$> t) (f n) (f <$> e)
+    GStruct n membs -> GStruct (f n) (map (parmFmap f) membs)
+    GMacro n args -> GMacro (f n) (map f args)
 
-data Program a = Prog [(Global a)]
+parmFmap :: Functor f => (a -> b) -> (f a, a) -> (f b, b)
+parmFmap f (t, n) = (f <$> t, f n)
+
+data Program a = Prog [Global a]
   deriving (Eq, Ord, Show)
+instance Functor Program where
+  fmap f (Prog globs) = Prog $ map (fmap f) globs
 
-testProg :: Program String
+testProg :: Program (IR.Id String)
 testProg =
   Prog
     [ GMacro (IR.ExId "include") [IR.ExId "<stdio.h>"]
@@ -241,7 +307,7 @@ testProg =
 --         (test--);
 --     }
 --     skepu::external([&]() {
---
+--         
 --     });
 --     std::cout << "Var a is: " << a;
 -- }
@@ -437,7 +503,7 @@ instance (Pretty a) => Pretty (Global a) where
     GMacro macro opt ->
       pretty "#" <> pretty macro <+> (hsep . map pretty) opt
 
-prettyParam :: (Pretty a) => ((Type a), IR.Id a) -> Doc ann
+prettyParam :: (Pretty a) => ((Type a), a) -> Doc ann
 prettyParam (t@(TPointer _), i) = pretty t <> pretty i
 prettyParam (t, i) = pretty t <+> pretty i
 
