@@ -630,21 +630,24 @@ instance Synthesizable Process where
                 (subsysNew, allC1) = foldr (synthesize procs') (newC, allC) systemProcs
                 inDefs = map varToCDef inputs
                 outDefs = map varToCDef outputs
-                delays = filter (\Vertex {delay} -> delay) vertices
-                delayProcs = mconcat . map (delayProc procs) $ delays
-                delayBodies = sequence . map (getDelayExpr . \Process{body = b} -> b) $ delayProcs
-                delayExprs = map delayExprToC <$> delayBodies
+                vertexContext v@Vertex {process} = case process of
+                  Left i -> find (\Context {from} -> from == i) subsysNew
+                    >>= \c -> Just (v, c)
+                  Right p' -> error $ "Encountered unlifted inline process: " <> show p'
+                vContext = sequenceA $ map vertexContext vertices
+                delays = filter (\(Vertex {delay}, _) -> delay) <$> vContext
                 delaySigs =
                   mconcat
-                    . map
-                      ( \v@Vertex{outputs = outputs'} ->
-                          if length outputs' == 1
-                            then outputs'
-                            else error $ "invalid delay outputs: " <> show v
+                    . mapMaybe
+                      ( \Vertex{delay, outputs = outputs'} ->
+                          if delay && length outputs' == 1
+                            then Just outputs'
+                            else Nothing
                       )
-                    $ delays
+                    $ vertices
                 delayTypes = map varToCDef delaySigs
-                delayDefs = delayExprs >>= \_c -> Just $ ((\(t, v) e -> (t, v <> ExId Delay, e)) <$> delayTypes) <*> _c
+                delayDefs = mconcat . map (\(Vertex {outputs = outs}, Context {delayStorage}) -> zipWith delayDef outs $ S.elems delayStorage) <$> delays
+                delayDef var (t, i, e) = (t, Direct var <> i, e)
                 subsysStorage = mconcat . mapMaybe (\Context{delayStorage, delay} -> if delay then Nothing else Just delayStorage) $ subsysNew
                 findVert vid = find (\Vertex{id = i} -> i == vid) vertices
                 schedVert = mapMaybe findVert <$> schedule
