@@ -219,6 +219,7 @@ resolveOp tmpix stmts [(t1, expr1)] tout = \case
   "length" -> case t1 of
     CIR.TConstructor _ _ -> (tmpix, stmts, (tout, CIR.ECallExpr (CIR.EMemberAccess expr1 (ExId $ Name "size")) []))
     _ -> error $ show t1
+  "id" -> (tmpix, stmts, (tout, expr1))
   u -> error $ "Unknown unary function: " <> u
 resolveOp tmpix stmts [(t1, expr1), (t2, expr2)] tout = \case
   "+" -> (tmpix, stmts, (tout, CIR.EBinOp CIR.Add e1 e2))
