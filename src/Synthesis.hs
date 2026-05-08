@@ -710,7 +710,6 @@ instance Synthesizable Process where
               , CIR.ECall (ExId $ Name "skepu::write") [CIR.EVar v]
               ]
         ]
-          <> breakInput CIR.SBreak
       _ ->
         [ CIR.SVarAssign
             ret
