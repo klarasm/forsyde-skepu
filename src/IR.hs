@@ -5,6 +5,7 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE NoFieldSelectors #-}
+{-# LANGUAGE DeriveDataTypeable #-}
 
 module IR (
   System (..),
@@ -27,6 +28,7 @@ module IR (
 )
 where
 
+import Data.Data (Data, Typeable)
 import Data.List (sort)
 import Data.Maybe (mapMaybe)
 import qualified Data.Set as S
@@ -50,6 +52,7 @@ data Id a
   | Nested (Id a) (Id a)
   | Ix Int
   | ExId a
+  deriving (Data, Typeable)
 instance (Ord a) => Ord (Id a) where
   compare Empty Empty = LT
   compare Empty _ = LT
@@ -131,6 +134,7 @@ data System = System
   , graph :: Maybe G.Graph
   , schedule :: Maybe [Int]
   }
+  deriving (Data, Typeable)
 instance Show System where
   show = show . pretty
 instance Pretty System where
@@ -160,6 +164,7 @@ data Process = Process
   , subsystem :: Maybe System
   , body :: CoreExpr
   }
+  deriving (Data, Typeable)
 instance Eq Process where
   (==) Process{binder = b1} Process{binder = b2} = b1 == b2
 instance Ord Process where
@@ -190,6 +195,7 @@ data Vertex = Vertex
   , outputs :: [Var]
   , delay :: Bool
   }
+  deriving (Data, Typeable)
 instance Show Vertex where
   show = show . pretty
 instance Pretty Vertex where
@@ -214,6 +220,7 @@ data Edge = Edge
   , source :: !Int
   , target :: !Int
   }
+  deriving (Data, Typeable)
 instance Show Edge where
   show = show . pretty
 instance Pretty Edge where
@@ -231,6 +238,7 @@ data Port
   | AbstExt Port Type
   | Signal Port Type String
   | Vector Port Type
+  deriving (Data, Typeable)
 
 instance Show Port where
   show = show . pretty

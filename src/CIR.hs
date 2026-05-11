@@ -1,4 +1,5 @@
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE DeriveDataTypeable #-}
 
 module CIR (
   StorageClass (..),
@@ -15,6 +16,7 @@ where
 
 import qualified IR
 import Prettyprinter
+import Data.Data (Data, Typeable)
 
 data StorageClass
   = Auto
@@ -22,7 +24,7 @@ data StorageClass
   | Static
   | Extern
   | TypeDefinition
-  deriving (Eq, Ord)
+  deriving (Data, Typeable, Eq, Ord)
 instance Pretty StorageClass where
   pretty = \case
     Auto -> pretty "auto"
@@ -37,7 +39,7 @@ data TypeQualifier
   = Const
   | Restrict
   | Volatile
-  deriving (Eq, Ord)
+  deriving (Data, Typeable, Eq, Ord)
 instance Pretty TypeQualifier where
   pretty = \case
     Const -> pretty "const"
@@ -51,7 +53,7 @@ data UnaryOperator
   | LogicalNot
   | PostIncrement
   | PostDecrement
-  deriving (Eq, Ord)
+  deriving (Data, Typeable, Eq, Ord)
 instance Pretty UnaryOperator where
   pretty = \case
     Negate -> pretty "-"
@@ -80,7 +82,7 @@ data BinaryOperator
   | LessEqual
   | Greater
   | GreaterEqual
-  deriving (Eq, Ord)
+  deriving (Data, Typeable, Eq, Ord)
 instance Pretty BinaryOperator where
   pretty = \case
     Add -> pretty "+"
@@ -119,7 +121,7 @@ data Type a
   | TQualifiedType [TypeQualifier] (Type a)
   | TConstructor (Type a) (Type a)
   | TAuto
-  deriving (Eq, Ord, Show)
+  deriving (Data, Typeable, Eq, Ord, Show)
 instance Functor Type where
   fmap f = \case
     TVoid -> TVoid
@@ -155,7 +157,7 @@ data Expression a
   | EParen (Expression a)
   | EStatement [(Statement a)] (Expression a)
   | ELambda [(a)] [((Type a), (a))] (Statement a)
-  deriving (Eq, Ord, Show)
+  deriving (Data, Typeable, Eq, Ord, Show)
 instance Functor Expression where
   fmap f = \case
     EVar i -> EVar $ f i
@@ -193,7 +195,7 @@ data Statement a
   | SGoto a
   | SLabel a
   | SStream a Bool [Expression a]
-  deriving (Eq, Ord, Show)
+  deriving (Data, Typeable, Eq, Ord, Show)
 instance Functor Statement where
   fmap f = \case
     SExpr e -> SExpr (f <$> e)
@@ -220,7 +222,7 @@ data Global a
   | GVarDef (Type a) a (Expression a)
   | GStruct a [(Type a, a)]
   | GMacro a [a]
-  deriving (Eq, Ord, Show)
+  deriving (Data, Typeable, Eq, Ord, Show)
 instance Functor Global where
   fmap f = \case
     GFuncDeclare sc t n parms -> GFuncDeclare sc (f <$> t) (f n) (map (parmFmap f) parms)
@@ -234,7 +236,7 @@ parmFmap :: Functor f => (a -> b) -> (f a, a) -> (f b, b)
 parmFmap f (t, n) = (f <$> t, f n)
 
 data Program a = Prog [Global a]
-  deriving (Eq, Ord, Show)
+  deriving (Data, Typeable, Eq, Ord, Show)
 instance Functor Program where
   fmap f (Prog globs) = Prog $ map (fmap f) globs
 
