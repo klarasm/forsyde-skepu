@@ -49,7 +49,7 @@ main = do
   case filtered of
     Just p@(m, r) -> do
       if arguments.outputFiltered then (print . P.pretty) p else pure ()
-      let context = synthesize r m ([] :: [Context Process], [])
+      let context = synthesize r m ([] :: [CContext], [])
       if arguments.outputComposed then print . P.pretty $ compose context else pure ()
     Nothing -> error $ "No such process: " <> arguments.process
   pure ()

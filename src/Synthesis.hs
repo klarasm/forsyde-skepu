@@ -7,7 +7,7 @@
 {-# LANGUAGE NoFieldSelectors #-}
 
 module Synthesis (
-  Context (..),
+  CContext (..),
   Synthesizable (..),
 ) where
 
@@ -56,7 +56,7 @@ type CExpression = CIR.Expression (Id IdExt)
 type CStatement = CIR.Statement (Id IdExt)
 type CProgram = CIR.Program (Id IdExt)
 
-data (Show a) => Context a = Context
+data CContext = CContext
   { from :: Id ()
   , ret :: CType
   , inputs :: [(CType, Id IdExt)]
@@ -66,8 +66,8 @@ data (Show a) => Context a = Context
   , body :: CStatement
   }
   deriving (Show)
-instance (Show a, Pretty a) => Pretty (Context a) where
-  pretty Context{..} =
+instance Pretty CContext where
+  pretty CContext{..} =
     pretty "Context"
       <> (nest 4 . tupled)
         [ pretty from
@@ -80,8 +80,8 @@ instance (Show a, Pretty a) => Pretty (Context a) where
 
 class Synthesizable a where
   -- may need to resolve a previously unresolved process as dependency
-  synthesize :: [a] -> a -> ([Context a], [Context a]) -> ([Context a], [Context a])
-  compose :: ([Context a], [Context a]) -> CProgram
+  synthesize :: [Process] -> Process -> ([a], [a]) -> ([a], [a])
+  compose :: ([a], [a]) -> CProgram
 
 portToC :: Port -> CType
 portToC = \case
@@ -157,8 +157,8 @@ outputIds = map ((ExId Output <>) . Ix) [0 ..]
 outputArgs :: [CExpression]
 outputArgs = map CIR.EVar outputIds
 
-vertexToExpr :: (Foldable t) => t (Id IdExt) -> (Vertex, Context a) -> CExpression
-vertexToExpr pointers (Vertex{id = _, ..}, Context {delayStorage}) = case process of
+vertexToExpr :: (Foldable t) => t (Id IdExt) -> (Vertex, CContext) -> CExpression
+vertexToExpr pointers (Vertex{id = _, ..}, CContext {delayStorage}) = case process of
   Right _ -> undefined
   Left v -> CIR.ECall (const IEmpty <$> v) $ map ioToExpr (map Direct inputs) <> map ioToExpr (map Direct outputs) <> delayParams
  where
@@ -585,9 +585,9 @@ removePoint = \case
   t -> t
 
 
-instance Synthesizable Process where
+instance Synthesizable CContext where
   synthesize procs p@Process{..} (newC, allC) =
-    case filter (\Context{from} -> binder == from) allC of
+    case filter (\CContext{from} -> binder == from) allC of
       c : _ -> (c : newC, allC)
       _ ->
         case subsystem of
@@ -598,7 +598,7 @@ instance Synthesizable Process where
                 delay = length argMap > length inputs + length outputs
                 argToDef (k, (t, _)) = (t, k)
                 context =
-                  Context
+                  CContext
                     { from = binder
                     , ret = case retLoc of
                         FunArg -> CIR.TVoid
@@ -623,7 +623,7 @@ instance Synthesizable Process where
                 inDefs = map varToCDef inputs
                 outDefs = map varToCDef outputs
                 vertexContext v@Vertex {process} = case process of
-                  Left i -> find (\Context {from} -> from == i) subsysNew
+                  Left i -> find (\CContext {from} -> from == i) subsysNew
                     >>= \c -> Just (v, c)
                   Right p' -> error $ "Encountered unlifted inline process: " <> show p'
                 vContext = sequenceA $ map vertexContext vertices
@@ -638,9 +638,9 @@ instance Synthesizable Process where
                       )
                     $ vertices
                 delayTypes = map varToCDef delaySigs
-                delayDefs = mconcat . map (\(Vertex {outputs = outs}, Context {delayStorage}) -> zipWith delayDef outs $ S.elems delayStorage) <$> delays
+                delayDefs = mconcat . map (\(Vertex {outputs = outs}, CContext {delayStorage}) -> zipWith delayDef outs $ S.elems delayStorage) <$> delays
                 delayDef var (t, i, e) = (t, Direct var <> i, e)
-                subsysStorage = mconcat . mapMaybe (\Context{delayStorage, delay} -> if delay then Nothing else Just delayStorage) $ subsysNew
+                subsysStorage = mconcat . mapMaybe (\CContext{delayStorage, delay} -> if delay then Nothing else Just delayStorage) $ subsysNew
                 findVert vid = find (\(Vertex{id = i}, _) -> i == vid) <$> vContext >>= id
                 schedVert = mapMaybe findVert <$> schedule
                 delaySigs' = map (\b -> Direct b <> ExId Delay) delaySigs
@@ -650,7 +650,7 @@ instance Synthesizable Process where
                 localDefs = map ((\(t, s) -> CIR.SVarDecl t s Nothing) . (\(t, n) -> (removePoint t, n)) . varToCDef) locals
                 delayTmps = map (\(t, i) -> CIR.SVarDef (removePoint t) i Nothing (CIR.EDereference . CIR.EVar $ i <> ExId Delay)) delayTypes
                 context =
-                  Context
+                  CContext
                     { from = binder
                     , ret = CIR.TVoid
                     , inputs = inDefs
@@ -740,7 +740,7 @@ instance Synthesizable Process where
           (CIR.SScope [stmt])
           Nothing
       ]
-    main Context{..} =
+    main CContext{..} =
       CIR.GFuncDef
         Nothing
         CIR.TInt
@@ -762,7 +762,7 @@ instance Synthesizable Process where
                      <> (mconcat . map putOutput) outputs
              ]
           <> [CIR.SReturn $ Just $ CIR.EInt $ -1]
-    contextToGlobal Context{..} =
+    contextToGlobal CContext{..} =
       ( CIR.GFuncDeclare (Just CIR.Static) ret (const IEmpty <$> from) $
           inputs <> outputs <> (S.elems . S.map (\(t, n, _) -> (t, n))) delayStorage
       , CIR.GFuncDef
