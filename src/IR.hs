@@ -20,7 +20,6 @@ module IR (
   makePorts,
   isDelayVar,
   typeOrConstraint,
-  delayVertex,
   procsFromId,
   vertexProcs,
   extractTypes,
@@ -478,12 +477,6 @@ isDelayVertex vertices vid =
   case filter (\Vertex{id = i, delay} -> i == vid && delay) $ vertices of
     _ : [] -> True
     _ -> False
-
-delayVertex :: Vertex -> Maybe Vertex
-delayVertex v@Vertex {delay} =
-  if delay
-    then Just v
-    else Nothing
 
 isDelayVar :: Var -> Bool
 isDelayVar v =
