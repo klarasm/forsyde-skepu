@@ -126,14 +126,15 @@ showSloppy = \case
   Direct binder -> getOccString binder
   other -> show other
 
+-- | A system containing mainly processes, vertices and edges.
 data System = System
-  { inputs :: [Var]
-  , outputs :: [Var]
-  , processes :: [Process]
-  , vertices :: [Vertex]
-  , edges :: [Edge]
-  , graph :: Maybe G.Graph
-  , schedule :: Maybe [Int]
+  { inputs :: [Var] -- ^ The system input binders
+  , outputs :: [Var] -- ^ The system output binders
+  , processes :: [Process] -- ^ Processes defined in the system
+  , vertices :: [Vertex] -- ^ Vertices inside the system
+  , edges :: [Edge] -- ^ Edges between vertices local to the system
+  , graph :: Maybe G.Graph -- ^ Dependencies excluding delay edges
+  , schedule :: Maybe [Int] -- ^ A schedule if one can be computed
   }
   deriving (Data, Typeable)
 instance Show System where
@@ -156,14 +157,15 @@ instance Pretty System where
               _ -> pretty "unschedulable"
           ]
 
--- A process constructor applied to a function, but not connected in a network.
+-- | A process constructor applied to a function, but not connected in a network.
 data Process = Process
-  { binder :: Id ()
-  , inports :: [Port]
-  , outports :: [Port]
-  , appliedInternal :: [Id ()]
-  , subsystem :: Maybe System
-  , body :: CoreExpr
+  { binder :: Id () -- ^ The constructed Id of the process, either from a
+                    -- or constructed from parent system Ids Core binder
+  , inports :: [Port] -- ^ The input types of the system
+  , outports :: [Port] -- ^ The output types of the system
+  , appliedInternal :: [Id ()] -- ^ Internal applications of binders
+  , subsystem :: Maybe System -- ^ A subsystem if it exists
+  , body :: CoreExpr -- ^ The body of the process
   }
   deriving (Data, Typeable)
 instance Eq Process where
@@ -184,17 +186,18 @@ instance Pretty Process where
           , maybe (braces . pretty . showPprUnsafe $ body) pretty subsystem
           ]
 
--- A process connected in a network.
--- It must therefore have at least an input and an output.
+-- | A process connected in a network.
+-- It must therefore have at least an output.
 -- A vertex can only be referred to inside the same system, since it represents
 -- an application of a process inside the system. This means the id only needs
 -- to be unique inside the system.
 data Vertex = Vertex
-  { id :: Int
-  , process :: Either (Id ()) Process
-  , inputs :: [Var]
-  , outputs :: [Var]
-  , delay :: Bool
+  { id :: Int -- ^ The Id of the vertex. It is only unique within its system
+  , process :: Either (Id ()) Process -- ^ The Id of the applied process or its
+                                      -- definition if inline
+  , inputs :: [Var] -- ^ Input signals
+  , outputs :: [Var] -- ^ Output signals
+  , delay :: Bool -- ^ If the vertex delays its output
   }
   deriving (Data, Typeable)
 instance Show Vertex where
@@ -214,12 +217,11 @@ instance Eq Vertex where
 instance Ord Vertex where
   compare Vertex{id = id1} Vertex{id = id2} = compare id1 id2
 
--- An edge (signal) inside a system.
--- Can only refer to local vertices.
+-- | An edge (signal) inside a system. Can only refer to local vertices.
 data Edge = Edge
-  { binder :: !Var
-  , source :: !Int
-  , target :: !Int
+  { binder :: !Var -- ^ The Core binder of the signal
+  , source :: !Int -- ^ The source vertex
+  , target :: !Int -- ^ The target vertex
   }
   deriving (Data, Typeable)
 instance Show Edge where
@@ -234,11 +236,12 @@ instance Pretty Edge where
           , pretty target
           ]
 
+-- | A repackaging of the Core types for easier recognition
 data Port
-  = Opaque Type
-  | AbstExt Port Type
-  | Signal Port Type String
-  | Vector Port Type
+  = Opaque Type -- ^ A plain Core type
+  | AbstExt Port Type -- ^ The representation of a presence or absence of an event
+  | Signal Port Type String -- ^ A signal type with its module string
+  | Vector Port Type -- ^ A vector type
   deriving (Data, Typeable)
 
 instance Show Port where
@@ -258,6 +261,8 @@ instance Pretty Port where
       pretty "VectorPort"
         <> (parens . pretty) inner
 
+-- | Translate a Core program into a top-level system. The top-level system
+-- itself only contains a list of processes.
 translate :: CoreProgram -> System
 translate f =
   System
@@ -276,6 +281,7 @@ translate f =
       Nothing -> acc
       Just p -> p : acc
 
+-- | Helper to process the output of extractTypes into Ports
 makePorts :: ([Type], [Type]) -> ([Port], [Port])
 makePorts (inty, outty) =
   (inports, outports)
@@ -283,6 +289,7 @@ makePorts (inty, outty) =
   inports = map makePort inty
   outports = map makePort outty
 
+-- | Reconstruct a Core type into a Port
 makePort :: Type -> Port
 makePort = \case
   t@(FunTy _ _ (TyVarTy v) ft_res) ->
