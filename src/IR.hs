@@ -468,9 +468,11 @@ translateExpr parent procs expr' = out
             }
       else Nothing
 
+-- | Find processes matching the supplied Id
 procsFromId :: Id a -> [Process] -> [Process]
 procsFromId var = filter (\Process{binder} -> binder == (const () <$> var))
 
+-- | True if the integer matches with a delay vertex in the provided list
 isDelayVertex :: [Vertex] -> Int -> Bool
 isDelayVertex vertices vid =
   case filter (\Vertex{id = i, delay} -> i == vid && delay) $ vertices of
