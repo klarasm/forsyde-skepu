@@ -225,8 +225,8 @@ resolveOp tmpix stmts [(t1, expr1), (t2, expr2)] tout = \case
   "const" -> (tmpix, stmts, (tout, e1))
   u -> error $ "Unknown binary function: " <> u
  where
-  e1 = derefArg (needDeref 0 (t1, tout)) expr1
-  e2 = derefArg (needDeref 0 (t2, tout)) expr2
+  e1 = derefTo tout t1 expr1
+  e2 = derefTo tout t2 expr2
 resolveOp _ _ _ _ = undefined
 
 exprToLambda :: Int -> OutputLoc -> [((Id IdExt), (CType, CExpression))] -> [Id IdExt] -> [CType] -> CType -> [(CType, Id IdExt)] -> [(CType, Id IdExt)] -> CoreExpr -> (Int, [CStatement], (CType, CExpression))
