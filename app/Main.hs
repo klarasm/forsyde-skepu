@@ -7,11 +7,11 @@
 
 module Main (main) where
 
-import IR
+import ForSyDe.Atom.Synthesis.IR
 import Options.Applicative
 import qualified Prettyprinter as P
-import Synthesis
-import Util
+import ForSyDe.Atom.Synthesis.Synthesis
+import ForSyDe.Atom.Synthesis.Util
 
 data Arguments = Arguments
   { inputFile :: String

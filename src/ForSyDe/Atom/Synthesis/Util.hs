@@ -1,4 +1,4 @@
-module Util (compileToCore, showPpr) where
+module ForSyDe.Atom.Synthesis.Util (compileToCore, showPpr) where
 
 import Data.Data
 import Data.Generics

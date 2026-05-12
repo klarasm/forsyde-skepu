@@ -1,7 +1,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE DeriveDataTypeable #-}
 
-module CIR (
+module ForSyDe.Atom.Synthesis.CIR (
   StorageClass (..),
   TypeQualifier (..),
   UnaryOperator (..),

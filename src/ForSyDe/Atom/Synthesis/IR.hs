@@ -7,7 +7,7 @@
 {-# LANGUAGE NoFieldSelectors #-}
 {-# LANGUAGE DeriveDataTypeable #-}
 
-module IR (
+module ForSyDe.Atom.Synthesis.IR (
   System (..),
   Process (..),
   Vertex (..),

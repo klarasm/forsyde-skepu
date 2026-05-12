@@ -6,7 +6,7 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE NoFieldSelectors #-}
 
-module Synthesis (
+module ForSyDe.Atom.Synthesis.Synthesis (
   CContext (..),
   Synthesizable (..),
 ) where
@@ -19,11 +19,11 @@ import GHC.Types.Literal
 import GHC.Types.Name (getOccString)
 import GHC.Utils.Outputable (showPprUnsafe)
 
-import qualified CIR
+import qualified ForSyDe.Atom.Synthesis.CIR as CIR
 import Data.List (find)
 import Data.Maybe (mapMaybe)
 import qualified Data.Set as S
-import IR
+import ForSyDe.Atom.Synthesis.IR as IR
 import Prettyprinter
 
 data IdExt
