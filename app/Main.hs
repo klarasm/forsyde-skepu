@@ -10,7 +10,7 @@ module Main (main) where
 import ForSyDe.Atom.Synthesis.IR
 import Options.Applicative
 import qualified Prettyprinter as P
-import ForSyDe.Atom.Synthesis.Synthesis
+import ForSyDe.Atom.Synthesis.SkePU
 import ForSyDe.Atom.Synthesis.Util
 
 data Arguments = Arguments

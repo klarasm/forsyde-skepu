@@ -6,7 +6,7 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE NoFieldSelectors #-}
 
-module ForSyDe.Atom.Synthesis.Synthesis (
+module ForSyDe.Atom.Synthesis.SkePU (
   CContext (..),
   Synthesizable (..),
 ) where
@@ -78,11 +78,6 @@ instance Pretty CContext where
         , pretty . S.elems $ delayStorage
         , pretty body
         ]
-
-class Synthesizable a where
-  -- may need to resolve a previously unresolved process as dependency
-  synthesize :: [Process] -> Process -> ([a], [a]) -> ([a], [a])
-  compose :: ([a], [a]) -> a
 
 portToC :: Port -> CType
 portToC = \case

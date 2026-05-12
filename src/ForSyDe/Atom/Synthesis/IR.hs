@@ -14,6 +14,7 @@ module ForSyDe.Atom.Synthesis.IR (
   Edge (..),
   Port (..),
   Id (..),
+  Synthesizable (..),
   translate,
   filterUnused,
   makePort,
@@ -701,3 +702,8 @@ getUsedAndLiftNested reachable p@Process{..} = S.singleton p{subsystem = subsys}
   (subsys, subsysUsed') = case subsystem of
     Just s' -> (\(a, b) -> (Just a, b)) . filterUnusedSystem (reachable, mempty) $ s'
     Nothing -> (Nothing, mempty)
+
+class Synthesizable a where
+  -- may need to resolve a previously unresolved process as dependency
+  synthesize :: [Process] -> Process -> ([a], [a]) -> ([a], [a])
+  compose :: ([a], [a]) -> a
