@@ -478,17 +478,23 @@ isDelayVertex vertices vid =
     _ : [] -> True
     _ -> False
 
+-- | True if the Core binder's string is delay and comes from ForSyDe-Atom
+-- synchronous MoC
 isDelayVar :: Var -> Bool
 isDelayVar v =
   getOccString v == "delay"
     && ((moduleString . getName) v == "ForSyDe.Atom.MoC.SY.Lib")
 
+-- | True if the process is applying a delay Var
 isDelayProcess :: Process -> Bool
 isDelayProcess Process{body} =
   case collectArgs body of
     (Var func, _args) -> isDelayVar func
     _ -> False
 
+-- | Traverse an expression and create processes. Note that this will create
+-- processes for all non-recursive Let binds, meaning the output has to be
+-- filtered for signals.
 getProcesses :: Id a -> [Process] -> CoreExpr -> [Process]
 getProcesses parent acc = \case
   Lam _ e -> getProcesses parent acc e
@@ -598,6 +604,7 @@ resolveTuples apps (proc, inputs, output, _) = Just (proc, inputs, outputs)
       lookup out (zip args (zip [0 ..] $ repeat var))
     _ -> Nothing
 
+-- | Make a process from an expression, input binds and output binds
 makeVertex :: Id a -> [Process] -> Int -> (CoreExpr, [Var], [Var]) -> Maybe Vertex
 makeVertex parent procs ix = \case
   -- An application of a non-inline process
@@ -625,6 +632,12 @@ makeVertex parent procs ix = \case
         , delay = isDelayProcess proc
         }
 
+-- | Match binders with targets and source from vertices. Note that multiple
+-- sources should never happen in practice. While GHC Uniques are not
+-- guarranteed to actually be unique and can shadow, this should never happen
+-- inside a system definition and should generate an error prior to Core
+-- generation. Should this happen anyway, it will likely produce a self-edge
+-- meaning the system won't be schedulable.
 makeEdge :: [Vertex] -> CoreBndr -> [Edge]
 makeEdge vertices bind = [Edge bind] <*> source <*> targets
  where
@@ -647,6 +660,7 @@ filterUnused procname System{..} =
  where
   procNamed name Process{binder} = showSloppy binder == name
 
+-- | Gather all processes referenced and lift them
 filterUnusedSystem :: (S.Set Process, S.Set Process) -> System -> (System, S.Set Process)
 filterUnusedSystem (reachable, used) s@System{..} =
   (s{processes = [], vertices = vertices'}, subsysUsed)
@@ -660,12 +674,16 @@ filterUnusedSystem (reachable, used) s@System{..} =
     Right Process{binder} -> v{process = Left binder}
     _ -> v
 
+-- | Helper to find processes matchin an Id in a Set, similar to procsFromId
 findProc :: Id a -> S.Set Process -> S.Set Process
 findProc var = S.filter (\Process{binder} -> binder == (const () <$> var))
+
+-- | Helper to find processes from internal references
 findInternal :: S.Set Process -> Process -> S.Set Process
 findInternal reachable Process{appliedInternal} =
   mconcat $ findProc <$> appliedInternal <*> [reachable]
 
+-- | Find processes referenced by a vertex or its inline process definition
 vertexProcs :: S.Set Process -> Vertex -> S.Set Process
 vertexProcs reachable Vertex{process} = case process of
   Left p ->
@@ -676,6 +694,7 @@ vertexProcs reachable Vertex{process} = case process of
     let internalApps = (findInternal $ reachable) p
      in S.singleton p <> internalApps
 
+-- | Lift all used processes while updating the subsystem to remove locals
 getUsedAndLiftNested :: S.Set Process -> Process -> S.Set Process
 getUsedAndLiftNested reachable p@Process{..} = S.singleton p{subsystem = subsys} <> subsysUsed'
  where
