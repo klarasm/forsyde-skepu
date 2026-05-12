@@ -659,9 +659,6 @@ filterUnusedSystem (reachable, used) s@System{..} =
     Right Process{binder} -> v{process = Left binder}
     _ -> v
 
--- findProc :: (Foldable t, Monoid (f Process), Applicative f) => Id -> t Process -> f Process
--- findProc vid = foldMap (\p@Process { binder = i } -> if vid == i then pure p else mempty)
-
 findProc :: Id a -> S.Set Process -> S.Set Process
 findProc var = S.filter (\Process{binder} -> binder == (const () <$> var))
 findInternal :: S.Set Process -> Process -> S.Set Process
