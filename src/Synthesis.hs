@@ -270,7 +270,7 @@ exprToLambda tmpix outLoc args largs tin tout inports outports expr = case expr 
     -- the expression resolves correctly.
     let args_pre = filter (\(glarg, _) -> not $ elem glarg largs) args
         args' = zipWith (\ix ((i, (t', _))) -> (i, (removePoint t', CIR.EVar $ ExId Input <> Ix ix))) [0..] args_pre
-        (tmpix1, stmts1, (_, expr1)) = exprToCExpr tmpix outLoc args' tin tout inputs outports e
+        (tmpix1, stmts1, (_, expr1)) = exprToCExpr tmpix args' tin tout inputs outports e
         inputs = zip tin inputIds
         expr2 = CIR.ELambda [] inputs $ CIR.SScope [CIR.SReturn $ Just expr1]
      in (tmpix1, stmts1, (tout, expr2))
@@ -311,8 +311,8 @@ skelAppToCExpr tmpix1 ret args stmts1 tin tout inports skel e1' =
           Return -> (tout, call)
       )
 
-exprToCExpr :: Int -> OutputLoc -> [((Id IdExt), (CType, CExpression))] -> [CType] -> CType -> [(CType, Id IdExt)] -> [(CType, Id IdExt)] -> CoreExpr -> (Int, [CStatement], (CType, CExpression))
-exprToCExpr tmpix outLoc args tin tout inports outports expr = case expr of
+exprToCExpr :: Int -> [((Id IdExt), (CType, CExpression))] -> [CType] -> CType -> [(CType, Id IdExt)] -> [(CType, Id IdExt)] -> CoreExpr -> (Int, [CStatement], (CType, CExpression))
+exprToCExpr tmpix args tin tout inports outports expr = case expr of
   -- Inner function applied to a function and a var
   App (App (App (App (Var inner) t1) t2) e1) e2@(Var v)
     | typeOrConstraint t1 && typeOrConstraint t2 && (not $ typeOrConstraint e1) && (not $ typeOrConstraint e2) ->
@@ -321,14 +321,14 @@ exprToCExpr tmpix outLoc args tin tout inports outports expr = case expr of
             let (tmpix1, stmts1, (_, e1')) = exprToLambda tmpix ret args [Direct v] [exprToCType t1, exprToCType t2] tout inports outports e1
              in skelAppToCExpr tmpix1 ret args stmts1 tin tout inports skel e1'
           Nothing ->
-            let (tmpix1, stmts1, (t1', expr1)) = exprToCExpr tmpix FunArg args tin (exprToCType t1) inports outports e1
-                (tmpix2, stmts2, (t2', expr2)) = exprToCExpr tmpix1 FunArg args tin (exprToCType t2) inports outports e2
+            let (tmpix1, stmts1, (t1', expr1)) = exprToCExpr tmpix args tin (exprToCType t1) inports outports e1
+                (tmpix2, stmts2, (t2', expr2)) = exprToCExpr tmpix1 args tin (exprToCType t2) inports outports e2
              in resolveOp tmpix2 (stmts1 <> stmts2) [(t1', expr1), (t2', expr2)] tout $ getOccString inner
   -- Binary operator/function (with type variables)
   App (App (App (App (Var f) t1) t2) e1) e2
     | typeOrConstraint t1 && typeOrConstraint t2 && (not $ typeOrConstraint e1) && (not $ typeOrConstraint e2) ->
-        let (tmpix1, stmts1, (_, expr1)) = exprToCExpr tmpix FunArg args tin (exprToCType t1) inports outports e1
-            (tmpix2, stmts2, (_, expr2)) = exprToCExpr tmpix1 FunArg args tin (exprToCType t2) inports outports e2
+        let (tmpix1, stmts1, (_, expr1)) = exprToCExpr tmpix args tin (exprToCType t1) inports outports e1
+            (tmpix2, stmts2, (_, expr2)) = exprToCExpr tmpix1 args tin (exprToCType t2) inports outports e2
          in resolveOp tmpix2 (stmts1 <> stmts2) [(exprToCType t1, expr1), (exprToCType t2, expr2)] tout $ getOccString f
   -- Inner function applied to a var
   App (App (App (App (Var f) t1) t2) t3) e1@(Var v1)
@@ -339,7 +339,7 @@ exprToCExpr tmpix outLoc args tin tout inports outports expr = case expr of
              in skelAppToCExpr tmpix1 ret args stmts1 tin tout inports skel e1'
           -- A little weird
           Nothing ->
-            let (tmpix1, stmts1, (t1', expr1)) = exprToCExpr tmpix FunArg args tin (varToCType v1) inports outports e1
+            let (tmpix1, stmts1, (t1', expr1)) = exprToCExpr tmpix args tin (varToCType v1) inports outports e1
              in resolveOp tmpix1 stmts1 [(t1', expr1)] tout $ getOccString f
   -- Inner function applied to an expression
   App (App (App (App (Var f) t1) t2) t3) e1
@@ -352,7 +352,7 @@ exprToCExpr tmpix outLoc args tin tout inports outports expr = case expr of
   -- A partially applied binary operator passed as a value. Apply it to the input argument
   App (App (App (Var f) t1) t2) e
     | typeOrConstraint t1 && typeOrConstraint t2 ->
-        let (tmpix1, stmts1, (t1', e1)) = exprToCExpr tmpix FunArg args tin tout inports outports e
+        let (tmpix1, stmts1, (t1', e1)) = exprToCExpr tmpix args tin tout inports outports e
             v1 = derefTo (exprToCType t1) (fst . head $ inports) $ CIR.EVar $ ExId Input <> Ix 0
          in resolveOp tmpix1 stmts1 [(t1', e1), (head tin, v1)] tout $ getOccString f
   -- Inner unary function applied onto an expression and var
@@ -441,10 +441,10 @@ makeComb inports outports tys e =
                   tout2 = exprToCType te2
                   tout3 = exprToCType te3
                   tout4 = exprToCType te4
-                  (cntr, init1, (_, ea1)) = exprToCExpr 0 FunArg argMap (map exprToCType tys) tout1 inports outports e1
-                  (cntr1, init2, (_, ea2)) = exprToCExpr cntr FunArg argMap (map exprToCType tys) tout2 inports outports e2
-                  (cntr2, init3, (_, ea3)) = exprToCExpr cntr1 FunArg argMap (map exprToCType tys) tout3 inports outports e3
-                  (_, init4, (_, ea4)) = exprToCExpr cntr2 FunArg argMap (map exprToCType tys) tout4 inports outports e4
+                  (cntr, init1, (_, ea1)) = exprToCExpr 0 argMap (map exprToCType tys) tout1 inports outports e1
+                  (cntr1, init2, (_, ea2)) = exprToCExpr cntr argMap (map exprToCType tys) tout2 inports outports e2
+                  (cntr2, init3, (_, ea3)) = exprToCExpr cntr1 argMap (map exprToCType tys) tout3 inports outports e3
+                  (_, init4, (_, ea4)) = exprToCExpr cntr2 argMap (map exprToCType tys) tout4 inports outports e4
                in ( FunArg
                   , argMap <> outArgs
                   , CIR.SScope $
@@ -463,9 +463,9 @@ makeComb inports outports tys e =
               let tout1 = exprToCType te1
                   tout2 = exprToCType te2
                   tout3 = exprToCType te3
-                  (cntr, init1, (_, ea1)) = exprToCExpr 0 FunArg argMap (map exprToCType tys) tout1 inports outports e1
-                  (cntr1, init2, (_, ea2)) = exprToCExpr cntr FunArg argMap (map exprToCType tys) tout2 inports outports e2
-                  (_, init3, (_, ea3)) = exprToCExpr cntr1 FunArg argMap (map exprToCType tys) tout3 inports outports e3
+                  (cntr, init1, (_, ea1)) = exprToCExpr 0 argMap (map exprToCType tys) tout1 inports outports e1
+                  (cntr1, init2, (_, ea2)) = exprToCExpr cntr argMap (map exprToCType tys) tout2 inports outports e2
+                  (_, init3, (_, ea3)) = exprToCExpr cntr1 argMap (map exprToCType tys) tout3 inports outports e3
                in ( FunArg
                   , argMap <> outArgs
                   , CIR.SScope $
@@ -481,8 +481,8 @@ makeComb inports outports tys e =
           | getOccString v' == "(,)" ->
               let tout1 = exprToCType te1
                   tout2 = exprToCType te2
-                  (cntr, init1, (_, ea1)) = exprToCExpr 0 FunArg argMap (map exprToCType tys) tout1 inports outports e1
-                  (_, init2, (_, ea2)) = exprToCExpr cntr FunArg argMap (map exprToCType tys) tout2 inports outports e2
+                  (cntr, init1, (_, ea1)) = exprToCExpr 0 argMap (map exprToCType tys) tout1 inports outports e1
+                  (_, init2, (_, ea2)) = exprToCExpr cntr argMap (map exprToCType tys) tout2 inports outports e2
                in ( FunArg
                   , argMap <> outArgs
                   , CIR.SScope $
@@ -494,7 +494,7 @@ makeComb inports outports tys e =
                   )
         _ ->
             let tout1 = exprToCType $ last tys
-                (_, init1, (_, ea1)) = exprToCExpr 0 FunArg argMap (map exprToCType $ init tys) tout1 inports outports expr
+                (_, init1, (_, ea1)) = exprToCExpr 0 argMap (map exprToCType $ init tys) tout1 inports outports expr
              in ( FunArg
                 , argMap <> outArgs
                 , CIR.SScope $
@@ -562,7 +562,7 @@ bodyToStatement inports outports = \case
   e@(Lam _ _) ->
     let (args, expr') = collectBinders e
         argMap = makeMap args inports
-        (_, stmts, (_, expr)) = exprToCExpr 0 Return argMap (map fst inports) (fst . head $ outports) inports outports expr'
+        (_, stmts, (_, expr)) = exprToCExpr 0 argMap (map fst inports) (fst . head $ outports) inports outports expr'
      in ( Return
         , argMap
         , CIR.SScope $
