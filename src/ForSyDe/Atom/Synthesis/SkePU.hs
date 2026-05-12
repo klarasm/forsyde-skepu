@@ -153,22 +153,6 @@ outputIds = map ((ExId Output <>) . Ix) [0 ..]
 outputArgs :: [CExpression]
 outputArgs = map CIR.EVar outputIds
 
-vertexToExpr :: (Foldable t) => t (Id IdExt) -> (Vertex, CContext) -> CExpression
-vertexToExpr pointers (Vertex{id = _, ..}, CContext {delayStorage}) = case process of
-  Right _ -> undefined
-  Left v -> CIR.ECall (const IEmpty <$> v) $ map ioToExpr (map Direct inputs) <> map ioToExpr (map Direct outputs) <> delayParams
- where
-  delayParams =
-    S.elems
-      . S.map (\(_, s, _) -> case s of
-        ExId Delay -> CIR.EVar . (<> ExId Delay) . Direct . head $ outputs
-        _ -> CIR.EVar s)
-      $ delayStorage
-  ioToExpr io =
-    if elem io pointers
-      then CIR.EVar io
-      else CIR.EReference . CIR.EVar $ io
-
 mkTemp :: Int -> (Int, Id IdExt)
 mkTemp ix = (ix + 1, ExId Tmp <> Ix ix)
 
@@ -580,6 +564,21 @@ removePoint = \case
   CIR.TPointer t -> t
   t -> t
 
+vertexToExpr :: (Foldable t) => t (Id IdExt) -> (Vertex, CContext) -> CExpression
+vertexToExpr pointers (Vertex{id = _, ..}, CContext {delayStorage}) = case process of
+  Right _ -> undefined
+  Left v -> CIR.ECall (const IEmpty <$> v) $ map ioToExpr (map Direct inputs) <> map ioToExpr (map Direct outputs) <> delayParams
+ where
+  delayParams =
+    S.elems
+      . S.map (\(_, s, _) -> case s of
+        ExId Delay -> CIR.EVar . (<> ExId Delay) . Direct . head $ outputs
+        _ -> CIR.EVar s)
+      $ delayStorage
+  ioToExpr io =
+    if elem io pointers
+      then CIR.EVar io
+      else CIR.EReference . CIR.EVar $ io
 
 instance Synthesizable CContext where
   synthesize procs p@Process{..} (newC, allC) =
