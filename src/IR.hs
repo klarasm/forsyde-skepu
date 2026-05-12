@@ -440,7 +440,7 @@ translateExpr parent procs expr' = out
     mapMaybe id . zipWith (makeVertex parent (procs <> processes)) [0 ..] $
       apps <> map (\(v, m) -> (Var v, [v], m)) inputMap
   edges = mconcat . map (makeEdge vertices) $ binds
-  sEdges =
+  dependencies =
     mapMaybe
       ( \Edge{source, target} ->
           if isDelayVertex vertices source
@@ -448,7 +448,9 @@ translateExpr parent procs expr' = out
             else Just $ (source, target)
       )
       edges
-  graph = G.buildG (0, length vertices - 1) sEdges
+  graph = G.buildG (0, length vertices - 1) dependencies
+  -- If there are no self-edges and there are no strongly-connected componets
+  -- the graph is a DAG, meaning topological sort can produce a valid schedule
   selfEdges = any (\Edge{source, target} -> source == target) edges
   schedulable = not selfEdges && (all (\(G.Node _ forest) -> forest == []) . G.scc $ graph)
   out =
