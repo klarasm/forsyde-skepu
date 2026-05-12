@@ -14,7 +14,6 @@ module CIR (
 )
 where
 
-import qualified IR
 import Prettyprinter
 import Data.Data (Data, Typeable)
 
@@ -239,80 +238,6 @@ data Program a = Prog [Global a]
   deriving (Data, Typeable, Eq, Ord, Show)
 instance Functor Program where
   fmap f (Prog globs) = Prog $ map (fmap f) globs
-
-testProg :: Program (IR.Id String)
-testProg =
-  Prog
-    [ GMacro (IR.ExId "include") [IR.ExId "<stdio.h>"]
-    , GMacro (IR.ExId "define") [IR.ExId "PI", IR.ExId "3.14159265458979323846"]
-    , GStruct
-        (IR.ExId "tf")
-        [ (TInt, IR.ExId "a")
-        , (TChar, IR.ExId "b")
-        ]
-    , GFuncDeclare Nothing TInt (IR.ExId "foo") [(TInt, IR.Empty)]
-    , GFuncDef
-        Nothing
-        TInt
-        (IR.ExId "main")
-        [(TInt, IR.ExId "argc"), (TPointer (TPointer TChar), IR.ExId "argv")]
-        ( SScope
-            [ SVarDecl TInt (IR.ExId "test") Nothing
-            , SVarDecl (TConstructor (TIdent $ IR.ExId "skepu::Vector") TInt) (IR.ExId "vec") $ Just [EInt 10]
-            , SVarDecl (TConstructor (TIdent $ IR.ExId "skepu::Matrix") TInt) (IR.ExId "mat") $ Just [EInt 10, EInt 10]
-            , SVarDef TAuto (IR.ExId "fwef") Nothing (ECall (IR.ExId "skepu::Map<2>") [])
-            , SVarDef TAuto (IR.ExId "fwef") Nothing (ECall (IR.ExId "skepu::Reduce") [ELambda [] [(TInt, IR.ExId "a"), (TInt, IR.ExId "b")] (SScope [SReturn . Just $ EBinOp Add (EVar $ IR.ExId "a") (EVar $ IR.ExId "b")])])
-            , SArrayDecl TChar (IR.ExId "s") [(EInt 2), (EInt 3)]
-            , SVarAssign (IR.ExId "test") (EInt 1)
-            , SVarAssign (IR.ExId "test") $ ECall (IR.ExId "foo") [EVar $ IR.ExId "test"]
-            , SIf (EBinOp Less (EVar $ IR.ExId "test") (EInt 10)) (SExpr $ EUnOp PostIncrement $ EVar $ IR.ExId "test") (Just $ SExpr $ EUnOp PostDecrement $ EVar $ IR.ExId "test")
-            , SIf (EBinOp Less (EVar $ IR.ExId "test") (EInt 10)) (SScope [SExpr $ EUnOp PostIncrement $ EVar $ IR.ExId "test"]) (Just $ SScope [SExpr $ EUnOp PostDecrement $ EVar $ IR.ExId "test"])
-            , SExpr $
-                ECall
-                  (IR.ExId "skepu::external")
-                  [ ELambda [IR.ExId "&"] [] $
-                      SScope
-                        []
-                  ]
-            , SStream (IR.ExId "std::cout") True [EString "Var a is: ", EVar (IR.ExId "a")]
-            ]
-        )
-    ]
-
--- >>> pretty testProg
--- #include <stdio.h>
--- #define PI 3.14159265458979323846
--- struct tf {
---     int a;
---     char b;
--- };
--- int foo (int );
--- int main (int argc, char **argv)
--- {
---     int test;
---     skepu::Vector<int> vec(10);
---     skepu::Matrix<int> mat(10, 10);
---     auto fwef = skepu::Map<2>();
---     auto fwef = skepu::Reduce([](int a, int b) {
---         return (a + b);
---     });
---     char s[2][3];
---     test = 1;
---     test = foo(test);
---     if ((test < 10))
---         (test++);
---     else
---         (test--);
---     if ((test < 10)) {
---         (test++);
---     } else {
---         (test--);
---     }
---     skepu::external([&]() {
---         
---     });
---     std::cout << "Var a is: " << a;
--- }
 
 instance (Pretty a) => Pretty (Type a) where
   pretty = \case
