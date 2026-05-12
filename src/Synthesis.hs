@@ -64,6 +64,7 @@ data CContext = CContext
   , delayStorage :: S.Set (CType, Id IdExt, CExpression)
   , delay :: Bool
   , body :: CStatement
+  , program :: Maybe CProgram
   }
   deriving (Show)
 instance Pretty CContext where
@@ -81,7 +82,7 @@ instance Pretty CContext where
 class Synthesizable a where
   -- may need to resolve a previously unresolved process as dependency
   synthesize :: [Process] -> Process -> ([a], [a]) -> ([a], [a])
-  compose :: ([a], [a]) -> CProgram
+  compose :: ([a], [a]) -> a
 
 portToC :: Port -> CType
 portToC = \case
@@ -614,6 +615,7 @@ instance Synthesizable CContext where
                           $ argMap
                     , delay
                     , body = body'
+                    , program = Nothing
                     }
              in (context : newC, context : allC)
           Just System{..} ->
@@ -662,11 +664,12 @@ instance Synthesizable CContext where
                     , body = CIR.SScope $ case schedStmts of
                         Just s -> localDefs <> delayTmps <> s
                         Nothing -> error "invalid schedule"
+                    , program = Nothing
                     }
              in (context : newC, context : allC1)
 
   compose ([], _) = error "Missing main context"
-  compose (mainC, allC) = CIR.Prog $ skepu <> [stdio] <> forwardDecls <> defs <> map main mainC
+  compose (mainC : _, allC) = mainC { program = Just $ CIR.Prog $ skepu <> [stdio] <> forwardDecls <> defs <> [main mainC] }
    where
     (forwardDecls, defs) = unzip . map contextToGlobal $ allC
     skepu =

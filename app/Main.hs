@@ -50,6 +50,10 @@ main = do
     Just p@(m, r) -> do
       if arguments.outputFiltered then (print . P.pretty) p else pure ()
       let context = synthesize r m ([] :: [CContext], [])
-      if arguments.outputComposed then print . P.pretty $ compose context else pure ()
+      if arguments.outputComposed
+        then case (compose context).program of
+          Just prog -> print . P.pretty $ prog
+          Nothing -> error "No program output"
+        else pure ()
     Nothing -> error $ "No such process: " <> arguments.process
   pure ()
