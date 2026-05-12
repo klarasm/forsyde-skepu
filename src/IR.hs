@@ -412,15 +412,19 @@ getInternal procs acc = \case
      in getInternal procs acc' e1
   _ -> acc
 
+-- | Is this a type, type variable, or constraint/predicate (e.g. Num a)?
 typeOrConstraint :: CoreExpr -> Bool
 typeOrConstraint = \case
   Var v -> isTyCoVar v || (isPredTy . varType) v
   Type _ -> True
   _ -> False
 
+-- | Helper to get the module of a Name
 moduleString :: Name -> String
 moduleString = moduleNameString . moduleName . nameModule
 
+-- | Traverse an expression and try to make a system out of it with at least
+-- one vertex.
 translateExpr :: Id a -> [Process] -> CoreExpr -> Maybe System
 translateExpr parent procs expr' = out
  where
