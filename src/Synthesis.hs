@@ -141,11 +141,6 @@ varToCDef v =
       name = Direct v
    in (ty, name)
 
-getDelayExpr :: CoreExpr -> Maybe CoreExpr
-getDelayExpr = \case
-  App (App (Var v) _) e | isDelayVar v -> Just e
-  _ -> Nothing
-
 delayExprToC :: CoreExpr -> CExpression
 delayExprToC = \case
   App (Var _) (Lit (LitNumber _ i)) -> CIR.EInt . fromIntegral $ i
@@ -239,7 +234,7 @@ exprToLambda tmpix outLoc args largs tin tout inports outports expr = case expr 
   App (App (Var f) t1) t2
     | typeOrConstraint t1 && typeOrConstraint t2 ->
         case makePorts . extractTypes [] . varType $ f of
-          (a1 : a2 : [], out : []) ->
+          (_ : _ : [], _ : []) ->
             let in1 = ExId Input <> Ix 0
                 t1' = exprToCType t1
                 in2 = ExId Input <> Ix 1
@@ -254,7 +249,7 @@ exprToLambda tmpix outLoc args largs tin tout inports outports expr = case expr 
           -- A partially applied binary function, construct a lambda. Note that
           -- SkePU does not use variable capture, but instead passes it as a
           -- scalar.
-          ((a1 : a2 : [], out : []), Just (argty1, arg1)) ->
+          ((_ : _ : [], _ : []), Just (_, _)) ->
             let in1 = ExId Input <> Ix 0
                 t1' = exprToCType t1
                 in2 = ExId Input <> Ix 1
@@ -370,8 +365,8 @@ exprToCExpr tmpix outLoc args tin tout inports outports expr = case expr of
   -- Unary operator/function (with type variables)
   App (App (Var f) t) (Var v) | typeOrConstraint t && (not $ typeOrConstraint $ Var v) ->
     case lookup (Direct v) args of
-      Just (argty, arg) ->
-        (tmpix, [], (tout, CIR.ECall (Direct f) [arg]))
+      Just (_, arg) ->
+        (tmpix, [], (tout, CIR.ECall (Direct f) [arg])) -- should convert this to derefTo
       Nothing -> error $ "Var not in args! " <> showPprUnsafe expr
   -- Inner function applied to a function. Apply it to the input arguments
   App (App (Var inner) t) e
@@ -397,14 +392,13 @@ exprToCExpr tmpix outLoc args tin tout inports outports expr = case expr of
     -- Assume the Var is a function
     -- TODO: need to rethink multiple output
     Nothing ->
-      let (inputs, outputs) = extractTypes [] . varType $ v
-          (inPorts, outPorts) = makePorts . extractTypes [] . varType $ v
+      let (_, outputs) = makePorts . extractTypes [] . varType $ v
           inArgs = zipWith3 derefTo tin (map fst inports) inputArgs
        in if length outputs == 1
             then
               ( tmpix
               , []
-              , (portToC . head $ outPorts, CIR.ECall (Direct v) inArgs)
+              , (portToC . head $ outputs, CIR.ECall (Direct v) inArgs)
               )
             else error "user functions with multiple output is currently unsupported"
   e -> error . showPprUnsafe $ e
@@ -683,7 +677,7 @@ instance Synthesizable Process where
       ]
     stdio = CIR.GMacro (ExId $ Name "include") [ExId $ Name "<stdio.h>"]
     getInput ret (t, v) = case removePoint t of
-      CIR.TConstructor i t' ->
+      CIR.TConstructor _ t' ->
         [ CIR.SExpr $
             CIR.ECall (ExId $ Name "skepu::external") $
               [ CIR.ELambda [ExId $ Name "&"] [] $
@@ -716,7 +710,7 @@ instance Synthesizable Process where
             (CIR.ECall (ExId $ Name "scanf") [CIR.EString $ typeToFormat t, CIR.EReference $ CIR.EVar v])
         ]
     putOutput (t, v) = case removePoint t of
-      CIR.TConstructor _ t' ->
+      CIR.TConstructor _ _ ->
         [ CIR.SStream (ExId $ Name "skepu::io::cout") True $
             [ CIR.EVar v
             , CIR.EString "\\n"
