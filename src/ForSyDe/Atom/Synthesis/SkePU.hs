@@ -260,12 +260,12 @@ skelAppToCExpr tmpix1 ret args stmts1 tin tout inports skel e1' =
   let (tmpix2, outname) = mkTemp tmpix1
       (tmpix3, skelInstance) = mkTemp tmpix2
       inputs = zipWith3 derefTo tin (map fst inports) (map (snd . snd) args)
-      ini = case tout of
-        CIR.TConstructor _ _ ->
+      ini = case (tout, inports, args) of
+        (CIR.TConstructor _ _, (inty, _) : _, (_, (_, expr)) : _) ->
           Just
             [ CIR.ECallExpr
                 ( CIR.EMemberAccess
-                    (derefTo CIR.TVoid (fst . head $ inports) $ snd . snd . head $ args)
+                    (derefTo CIR.TVoid inty expr)
                     (ExId $ Name "size")
                 )
                 []
@@ -397,7 +397,7 @@ derefArg num var = case compare num 0 of
   EQ -> var
 
 derefTo :: CIR.Type a1 -> CIR.Type a2 -> CIR.Expression a -> CIR.Expression a
-derefTo outty inty = derefArg (needDeref 0 (inty, outty))
+derefTo outty inty = derefArg (needDeref (0 :: Int) (inty, outty))
 
 -- | Make an argument map, from args if existent otherwise from ports
 makeMap :: (Ord a, Eq a2) => [CoreBndr] -> [(a2, Id a)] -> [((Id a), (a2, CIR.Expression (Id a)))]
