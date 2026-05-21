@@ -327,12 +327,6 @@ extractTypes acc = \case
     TyConApp v types | isTupleTyCon v -> reverse resacc <> types
     t -> reverse (t : resacc)
 
--- | Strip Lams and record the binders
-stripLams :: [CoreBndr] -> CoreExpr -> ([CoreBndr], CoreExpr)
-stripLams acc expr = case expr of
-  Lam a e -> stripLams (a : acc) e
-  _ -> (acc, expr)
-
 -- | Strip Apps matching with the binders from stripLams
 stripApps :: ([CoreBndr], CoreExpr) -> Maybe CoreExpr
 -- If we have an empty binder list the eta-reduce succeeded
@@ -349,7 +343,7 @@ stripLamApps :: CoreExpr -> CoreExpr
 stripLamApps expr = case expr of
   -- Also strip corresponding type variables
   Lam b e | typeOrConstraint (Var b) -> stripLamApps e
-  Lam _ _ -> case stripApps . stripLams [] $ expr of
+  Lam _ _ -> case stripApps . (\(b, e) -> (reverse b, e)) . collectBinders $ expr of
     Just e -> stripLamApps e
     Nothing -> expr
   _ -> expr
