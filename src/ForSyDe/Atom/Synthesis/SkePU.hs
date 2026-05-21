@@ -673,8 +673,7 @@ instance Synthesizable CContext where
                 subsysStorage = mconcat . mapMaybe (\CContext{delayStorage, delay} -> if delay then Nothing else Just delayStorage) $ subsysNew
                 findVert vid = find (\(Vertex{id = i}, _) -> i == vid) <$> vContext >>= id
                 -- Collect the vertices in scheduled order
-                -- TODO: should probably error out if a vertex is not found
-                schedVert = mapMaybe findVert <$> schedule
+                schedVert = sequenceA <$> map findVert <$> schedule >>= id
                 delaySigs' = map (\b -> Direct b <> ExId Delay) delaySigs
                 pointers = delaySigs' <> map Direct inputs <> map Direct outputs
                 -- Get the calls to the scheduled processes, passing which
