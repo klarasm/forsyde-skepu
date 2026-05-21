@@ -218,9 +218,9 @@ instance Ord Vertex where
 
 -- | An edge (signal) inside a system. Can only refer to local vertices.
 data Edge = Edge
-  { binder :: !Var -- ^ The Core binder of the signal
-  , source :: !Int -- ^ The source vertex
-  , target :: !Int -- ^ The target vertex
+  { binder :: Var -- ^ The Core binder of the signal
+  , source :: Int -- ^ The source vertex
+  , target :: Int -- ^ The target vertex
   }
   deriving (Data, Typeable)
 instance Show Edge where
