@@ -78,7 +78,7 @@ instance (Eq a) => Eq (Id a) where
   (==) _ _ = False
 instance (Pretty a) => Pretty (Id a) where
   pretty = \case
-    Empty -> pretty ""
+    Empty -> mempty
     Direct binder -> getString binder
     Nested (ExId e1) (ExId e2) -> pretty e1 <> pretty e2
     Nested e1@(Nested _ (ExId _)) (ExId e2) -> pretty e1 <> pretty e2
