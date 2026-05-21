@@ -79,6 +79,7 @@ instance Pretty CContext where
         , pretty body
         ]
 
+-- | Map Ports into C types
 portToC :: Port -> CType
 portToC = \case
   Signal a _ _ -> CIR.TPointer $ portToC a
@@ -89,6 +90,7 @@ portToC = \case
     CIR.TConstructor (CIR.TIdent $ ExId IVector) (portToC p)
   Opaque t -> typeToCType t
 
+-- | Map GHC types into C types
 typeToCType :: Type -> CType
 typeToCType = \case
   TyVarTy v
@@ -122,21 +124,26 @@ typeToCType = \case
   TyConApp v a -> error $ "TyConApp: " <> (getOccString . tyConName) v <> " " <> showPprUnsafe a
   t -> error $ "Something else: " <> showPprUnsafe t
 
+-- | Make a C type of a GHC var
 varToCType :: Var -> CType
 varToCType = portToC . makePort . varType
 
+-- | Make a C type of a GHC Core expression.
+-- NOTE: should only be used on GHC types or vars
 exprToCType :: CoreExpr -> CType
 exprToCType = \case
   Type t -> portToC . makePort $ t
   Var v -> varToCType v
   _ -> error "Not a type!"
 
+-- | Make a C type and Id pair from a GHC Core binder
 varToCDef :: Var -> (CType, Id IdExt)
 varToCDef v =
   let ty = varToCType v
       name = Direct v
    in (ty, name)
 
+-- | Extract the initial value of a delay
 delayExprToC :: CoreExpr -> CExpression
 delayExprToC = \case
   App (Var _) (Lit (LitNumber _ i)) -> CIR.EInt . fromIntegral $ i
@@ -153,6 +160,7 @@ outputIds = map ((ExId Output <>) . Ix) [0 ..]
 outputArgs :: [CExpression]
 outputArgs = map CIR.EVar outputIds
 
+-- | Make a new temporary identifier
 mkTemp :: Int -> (Int, Id IdExt)
 mkTemp ix = (ix + 1, ExId Tmp <> Ix ix)
 
@@ -160,6 +168,7 @@ data OutputLoc
   = FunArg
   | Return
 
+-- Get the corresponding SkePU skeleton from the function name
 skelToSkePU :: String -> Maybe (OutputLoc, Id IdExt)
 skelToSkePU = \case
   "reduce" -> Just (Return, ExId Reduce)
@@ -181,6 +190,7 @@ skelToSkePU = \case
   "farm44" -> Just (FunArg, ExId Map <> (ExId $ Name "<4>"))
   _ -> Nothing
 
+-- | Match names of functions to C operations.
 resolveOp ::
   Int ->
   [CStatement] ->
@@ -208,6 +218,8 @@ resolveOp tmpix stmts [(t1, expr1), (t2, expr2)] tout = \case
   e2 = derefTo tout t2 expr2
 resolveOp _ _ _ _ = undefined
 
+-- | Wrap a C expression into a lambda, returning that as a statement and the
+-- expression to call it.
 exprToLambda :: Int -> OutputLoc -> [((Id IdExt), (CType, CExpression))] -> [Id IdExt] -> [CType] -> CType -> [(CType, Id IdExt)] -> [(CType, Id IdExt)] -> CoreExpr -> (Int, [CStatement], (CType, CExpression))
 exprToLambda tmpix outLoc args largs tin tout inports outports expr = case expr of
   -- A function passed as a value (with type constraints). Construct a lambda
@@ -290,6 +302,8 @@ skelAppToCExpr tmpix1 ret args stmts1 tin tout inports skel e1' =
           Return -> (tout, call)
       )
 
+-- | Traverse a GHC Core expression and transform it into a C expression (and
+-- possibly statements).
 exprToCExpr :: Int -> [((Id IdExt), (CType, CExpression))] -> [CType] -> CType -> [(CType, Id IdExt)] -> [(CType, Id IdExt)] -> CoreExpr -> (Int, [CStatement], (CType, CExpression))
 exprToCExpr tmpix args tin tout inports outports expr = case expr of
   -- Inner function applied to a function and a var
@@ -383,6 +397,7 @@ exprToCExpr tmpix args tin tout inports outports expr = case expr of
             else error "user functions with multiple output is currently unsupported"
   e -> error . showPprUnsafe $ e
 
+-- | Compute the difference in pointer type
 needDeref :: (Num t) => t -> (CIR.Type a1, CIR.Type a2) -> t
 needDeref cur = \case
   (CIR.TPointer argTy, CIR.TPointer parmTy) -> needDeref cur (argTy, parmTy)
@@ -390,12 +405,15 @@ needDeref cur = \case
   (argTy, CIR.TPointer parmTy) -> needDeref (cur - 1) (argTy, parmTy)
   _ -> cur
 
+-- | Dereference (or form a reference of) an expression `num` times.
 derefArg :: (Ord t, Num t) => t -> CIR.Expression a -> CIR.Expression a
 derefArg num var = case compare num 0 of
   LT -> derefArg (num + 1) $ CIR.EReference var
   GT -> derefArg (num - 1) $ CIR.EDereference var
   EQ -> var
 
+-- | Dereference (or form a reference of) an expression of `inty` until it
+-- matches `outty`
 derefTo :: CIR.Type a1 -> CIR.Type a2 -> CIR.Expression a -> CIR.Expression a
 derefTo outty inty = derefArg (needDeref (0 :: Int) (inty, outty))
 
@@ -408,8 +426,12 @@ makeMap args ports =
           map (\(t, n) -> (n, (t, CIR.EVar n))) ports
       | otherwise -> m
 
+-- | Create processes using combNM. Note that only the number of tupled outputs
+-- will change how it is processed, meaning this could accept any combNM where
+-- M in [1,4].
 makeComb :: [(CType, Id IdExt)] -> [(CType, Id IdExt)] -> [CoreExpr] -> Expr CoreBndr -> (OutputLoc, [((Id IdExt), (CType, CExpression))], CStatement)
 makeComb inports outports tys e =
+  -- TODO: should split the input args and outputs
   let (args, expr) = collectBinders e
       argMap = makeMap args inports
       outArgs = makeMap [] outports
@@ -481,6 +503,8 @@ makeComb inports outports tys e =
                       <> [ CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 0) ea1 ]
                 )
 
+-- | Here all the process constructors are recognised and either passed to a
+-- helper or processed dierectly
 bodyToStatement :: [(CType, Id IdExt)] -> [(CType, Id IdExt)] -> CoreExpr -> (OutputLoc, [((Id IdExt), (CType, CExpression))], CStatement)
 bodyToStatement inports outports = \case
   App (App (App (App (App (App (App (App (App (App (App (App (App (Var v) t1) t2) t3) t4) t5) t6) t7) t8) t9) t10) t11) t12) e
