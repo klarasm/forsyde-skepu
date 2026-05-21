@@ -341,8 +341,6 @@ stripApps ((x : xs), expr) = case expr of
 -- | Attempt to strip matching Lam App pairs (perform an eta-reduce)
 stripLamApps :: CoreExpr -> CoreExpr
 stripLamApps expr = case expr of
-  -- Also strip corresponding type variables
-  Lam b e | typeOrConstraint (Var b) -> stripLamApps e
   Lam _ _ -> case stripApps . (\(b, e) -> (reverse b, e)) . collectBinders $ expr of
     Just e -> stripLamApps e
     Nothing -> expr
