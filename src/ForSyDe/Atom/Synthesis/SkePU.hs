@@ -607,9 +607,11 @@ vertexToExpr pointers (Vertex{id = _, ..}, CContext {delayStorage}) = case proce
 instance Synthesizable CContext where
   synthesize procs p@Process{..} (newC, allC) =
     case filter (\CContext{from} -> binder == from) allC of
+      -- We already synthesised this process, just return that
       c : _ -> (c : newC, allC)
       _ ->
         case subsystem of
+          -- We don't have a subsystem, need to actually traverse the body.
           Nothing ->
             let inputs = zip (map portToC inports) inputIds
                 outputs = zip (map portToC outports) outputIds
@@ -636,18 +638,24 @@ instance Synthesizable CContext where
                     , program = Nothing
                     }
              in (context : newC, context : allC)
+          -- We have a subsystem, instantiate the scheduled vertices as calls
+          -- to processes.
           Just System{..} ->
             let procs' = filter (/= p) procs
+                -- Get all (unqiue) referenced processes in the system.
                 systemProcs = S.elems . mconcat . map (vertexProcs (S.fromList procs)) $ vertices
+                -- Synthesise all referenced processes.
                 (subsysNew, allC1) = foldr (synthesize procs') (newC, allC) systemProcs
                 inDefs = map varToCDef inputs
                 outDefs = map varToCDef outputs
+                -- Link all vertices to its invoked process' context.
                 vertexContext v@Vertex {process} = case process of
                   Left i -> find (\CContext {from} -> from == i) subsysNew
                     >>= \c -> Just (v, c)
                   Right p' -> error $ "Encountered unlifted inline process: " <> show p'
                 vContext = sequenceA $ map vertexContext vertices
                 delays = filter (\(Vertex {delay}, _) -> delay) <$> vContext
+                -- Get the vars of all delay signals.
                 delaySigs =
                   mconcat
                     . mapMaybe
@@ -658,16 +666,25 @@ instance Synthesizable CContext where
                       )
                     $ vertices
                 delayTypes = map varToCDef delaySigs
+                -- Get the definition of delay parameters and their initial value.
                 delayDefs = mconcat . map (\(Vertex {outputs = outs}, CContext {delayStorage}) -> zipWith delayDef outs $ S.elems delayStorage) <$> delays
                 delayDef var (t, i, e) = (t, Direct var <> i, e)
+                -- Get all delays passed from subsystems.
                 subsysStorage = mconcat . mapMaybe (\CContext{delayStorage, delay} -> if delay then Nothing else Just delayStorage) $ subsysNew
                 findVert vid = find (\(Vertex{id = i}, _) -> i == vid) <$> vContext >>= id
+                -- Collect the vertices in scheduled order
+                -- TODO: should probably error out if a vertex is not found
                 schedVert = mapMaybe findVert <$> schedule
                 delaySigs' = map (\b -> Direct b <> ExId Delay) delaySigs
                 pointers = delaySigs' <> map Direct inputs <> map Direct outputs
+                -- Get the calls to the scheduled processes, passing which
+                -- Ids should be dereferenced or not.
                 schedStmts = map (CIR.SExpr . vertexToExpr pointers) <$> schedVert
                 locals = filter (\v -> not (elem (Direct v) (pointers <> map Direct delaySigs))) . map (\(Edge v _ _) -> v) $ edges
+                -- Get declarations of intermediare signals.
                 localDefs = map ((\(t, s) -> CIR.SVarDecl t s Nothing) . (\(t, n) -> (removePoint t, n)) . varToCDef) locals
+                -- Get definitions of delays and initialise them to their
+                -- previous value.
                 delayTmps = map (\(t, i) -> CIR.SVarDef (removePoint t) i Nothing (CIR.EDereference . CIR.EVar $ i <> ExId Delay)) delayTypes
                 context =
                   CContext
