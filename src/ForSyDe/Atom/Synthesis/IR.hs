@@ -486,9 +486,14 @@ isDelayVar v =
 
 -- | True if the process is applying a delay Var
 isDelayProcess :: Process -> Bool
-isDelayProcess Process{body} =
-  case collectArgs body of
-    (Var func, _args) -> isDelayVar func
+isDelayProcess Process{body} = isDelayExpr body
+ where
+  isDelayExpr = \case
+    App (App (Var delay) _) _ -> isDelayVar delay
+    App (App (App (App (App (Var composition) t1) t2) t3) e1) e2
+      | typeOrConstraint t1 && typeOrConstraint t2 && typeOrConstraint t3
+        && getOccString composition == "."
+          -> isDelayExpr e1 || isDelayExpr e2
     _ -> False
 
 -- | Traverse an expression and create processes. Note that this will create
