@@ -156,6 +156,7 @@ data Expression a
   | EParen (Expression a)
   | EStatement [(Statement a)] (Expression a)
   | ELambda [(a)] [((Type a), (a))] (Statement a)
+  | ETernary (Expression a) (Expression a) (Expression a)
   deriving (Data, Typeable, Eq, Ord, Show)
 instance Functor Expression where
   fmap f = \case
@@ -176,6 +177,7 @@ instance Functor Expression where
     EParen e -> EParen (f <$> e)
     EStatement stmts expr -> EStatement (map (fmap f) stmts) (f <$> expr)
     ELambda capture parms stmt -> ELambda (map f capture) (map (parmFmap f) parms) (f <$> stmt)
+    ETernary cond true false -> ETernary (f <$> cond) (f <$> true) (f <$> false)
 
 data Statement a
   = SExpr (Expression a)
@@ -295,6 +297,10 @@ instance (Pretty a) => Pretty (Expression a) where
       pretty capture
         <> parens (hsep . punctuate comma $ (map prettyParam params))
           <+> pretty body
+    ETernary cond true false ->
+      lparen <> pretty cond <> rparen <+> pretty "?"
+        <+> lparen <> pretty true <> rparen <+> colon
+        <+> lparen <> pretty false <> rparen
 
 instance (Pretty a) => Pretty (Statement a) where
   pretty = \case
