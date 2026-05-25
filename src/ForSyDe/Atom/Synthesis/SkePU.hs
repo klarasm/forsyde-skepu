@@ -213,6 +213,7 @@ resolveOp tmpix stmts [(t1, expr1), (t2, expr2)] tout = \case
   "div" -> error "Haskell `div` rounds to negative infinity, not implemented. Consider using `quot`"
   "const" -> (tmpix, stmts, (tout, e1))
   "max" -> (tmpix, stmts, (tout, CIR.ETernary (CIR.EBinOp CIR.Greater expr1 expr2) expr1 expr2))
+  "min" -> (tmpix, stmts, (tout, CIR.ETernary (CIR.EBinOp CIR.Less expr1 expr2) expr1 expr2))
   u -> error $ "Unknown binary function: " <> u
  where
   e1 = derefTo tout t1 expr1
