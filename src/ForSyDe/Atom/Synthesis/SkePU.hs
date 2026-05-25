@@ -554,12 +554,8 @@ bodyToStatement inports outports = \case
   App (App (Var v) t) e
     | typeOrConstraint t && getOccString v == "delay" ->
         ( FunArg
-        , zipWith (\i p -> (i, (fst p, CIR.EVar i)))
-            [ExId Input <> Ix 0, ExId Output <> Ix 0]
-            (inports <> outports)
-            <> zipWith (\i p -> (i, (fst p, delayExprToC e)))
-                [ExId Delay]
-                outports
+        , map (\(t', i) -> (i, (t', CIR.EVar i))) (inports <> outports)
+            <> zipWith (\i (t', _) -> (i, (t', delayExprToC e))) [ExId Delay] outports
         , delayBody
         )
   -- Might be a regular function, i.e. not a process
