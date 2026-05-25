@@ -562,7 +562,7 @@ bodyToStatement inports outports = \case
         , delayBody
         )
   -- Might be a regular function, i.e. not a process
-  e@(Lam _ _) ->
+  e ->
     let (args, expr') = collectBinders e
         argMap = makeMap args inports
         (_, stmts, (_, expr)) = exprToCExpr 0 argMap (map fst inports) (fst . head $ outports) inports outports expr'
@@ -572,7 +572,6 @@ bodyToStatement inports outports = \case
             stmts
               <> [CIR.SReturn . Just $ expr]
         )
-  e -> error . showPprUnsafe $ e
   where
     -- The delay can both be used on intermediary signals and input/output
     -- signals. When used on an output signal, it needs to also output the
