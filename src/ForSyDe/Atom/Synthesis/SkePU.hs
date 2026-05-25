@@ -344,12 +344,18 @@ exprToCExpr tmpix args tin tout inports outports expr = case expr of
             let (tmpix1, stmts1, (_, e1')) = exprToLambda tmpix ret args [] [exprToCType t1, exprToCType t2] (exprToCType t3) inports outports e1
              in skelAppToCExpr tmpix1 ret args stmts1 tin tout inports skel e1'
           Nothing -> error . showPprUnsafe $ e1
-  -- A partially applied binary operator passed as a value. Apply it to the input argument
   App (App (App (Var f) t1) t2) e
     | typeOrConstraint t1 && typeOrConstraint t2 ->
-        let (tmpix1, stmts1, (t1', e1)) = exprToCExpr tmpix args tin tout inports outports e
-            v1 = derefTo (exprToCType t1) (fst . head $ inports) $ CIR.EVar $ ExId Input <> Ix 0
-         in resolveOp tmpix1 stmts1 [(t1', e1), (head tin, v1)] tout $ getOccString f
+      case skelToSkePU $ getOccString f of
+        -- A partially applied binary operator passed as a value. Apply it to the input argument
+        Nothing ->
+          let (tmpix1, stmts1, (t1', e1)) = exprToCExpr tmpix args tin tout inports outports e
+              v1 = derefTo (exprToCType t1) (fst . head $ inports) $ CIR.EVar $ ExId Input <> Ix 0
+           in resolveOp tmpix1 stmts1 [(t1', e1), (head tin, v1)] tout $ getOccString f
+        -- A skeleton applied to a unary function
+        Just (ret, skel) ->
+            let (tmpix1, stmts1, (_, e1')) = exprToLambda tmpix ret args [] tin tout inports outports e
+             in skelAppToCExpr tmpix1 ret args stmts1 tin tout inports skel e1'
   -- Inner unary function applied onto an expression and var
   App (App (App (Var inner) t1) e) (Var v)
     | typeOrConstraint t1 && (not $ typeOrConstraint e) ->
