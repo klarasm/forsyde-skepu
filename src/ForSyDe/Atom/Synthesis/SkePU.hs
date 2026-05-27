@@ -258,11 +258,14 @@ exprToLambda tmpix outLoc args largs tin tout inports outports expr = case expr 
         varToArgMap v i = (Direct v, (varToCType v, CIR.EVar i))
     in exprToLambda tmpix outLoc (args' <> args) largs tin tout inports outports e1
   e ->
+    -- NOTE: Currently, if exprToCExpr encounters a partially applied
+    -- expression, it will automatically apply it to the first input argument.
+    -- This should ideally be generalised.
     -- As mentioned above, SkePU does not use lambda variable capture, instead
     -- all scalar values are passed as arguments. Rename the input arguments so
     -- the expression resolves correctly.
     let args_pre = filter (\(glarg, _) -> not $ elem glarg largs) args
-        args' = zipWith (\ix ((i, (t', _))) -> (i, (removePoint t', CIR.EVar $ ExId Input <> Ix ix))) [0..] args_pre
+        args' = zipWith (\ix ((i, (t', _))) -> (i, (removePoint t', CIR.EVar $ ExId Input <> Ix ((length largs) + ix)))) [0..] args_pre
         (tmpix1, stmts1, (_, expr1)) = exprToCExpr tmpix args' tin tout inputs outports e
         inputs = zip tin inputIds
         expr2 = CIR.ELambda [] inputs $ CIR.SScope [CIR.SReturn $ Just expr1]
@@ -348,6 +351,7 @@ exprToCExpr tmpix args tin tout inports outports expr = case expr of
     | typeOrConstraint t1 && typeOrConstraint t2 ->
       case skelToSkePU $ getOccString f of
         -- A partially applied binary operator passed as a value. Apply it to the input argument
+        -- TODO: look at a better way to handle this than assuming the first argument
         Nothing ->
           let (tmpix1, stmts1, (t1', e1)) = exprToCExpr tmpix args tin tout inports outports e
               v1 = derefTo (exprToCType t1) (fst . head $ inports) $ CIR.EVar $ ExId Input <> Ix 0
