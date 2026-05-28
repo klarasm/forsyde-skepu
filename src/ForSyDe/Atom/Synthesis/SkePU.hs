@@ -254,8 +254,8 @@ exprToLambda tmpix outLoc args largs tin tout inports outports expr = case expr 
           _ -> undefined
   e@(Lam _ _) ->
     let (b1, e1) = collectBinders e
-        args' = zipWith varToArgMap b1 $ inputIds
-        varToArgMap v i = (Direct v, (varToCType v, CIR.EVar (Direct v)))
+        args' = map varToArgMap b1
+        varToArgMap v = (Direct v, (varToCType v, CIR.EVar (Direct v)))
     in exprToLambda tmpix outLoc (args' <> args) largs tin tout inports outports e1
   e ->
     let args' = map (\(i1, (t, i2)) -> (i1, (removePoint t, i2))) args
