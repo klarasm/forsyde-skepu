@@ -21,7 +21,7 @@ import GHC.Utils.Outputable (showPprUnsafe)
 
 import qualified ForSyDe.Atom.Synthesis.CIR as CIR
 import Data.List (find)
-import Data.Maybe (mapMaybe)
+import Data.Maybe (mapMaybe, maybeToList)
 import qualified Data.Set as S
 import ForSyDe.Atom.Synthesis.IR as IR
 import Prettyprinter
@@ -255,19 +255,17 @@ exprToLambda tmpix outLoc args largs tin tout inports outports expr = case expr 
   e@(Lam _ _) ->
     let (b1, e1) = collectBinders e
         args' = zipWith varToArgMap b1 $ inputIds
-        varToArgMap v i = (Direct v, (varToCType v, CIR.EVar i))
+        varToArgMap v i = (Direct v, (varToCType v, CIR.EVar (Direct v)))
     in exprToLambda tmpix outLoc (args' <> args) largs tin tout inports outports e1
   e ->
-    -- NOTE: Currently, if exprToCExpr encounters a partially applied
-    -- expression, it will automatically apply it to the first input argument.
-    -- This should ideally be generalised.
-    -- As mentioned above, SkePU does not use lambda variable capture, instead
-    -- all scalar values are passed as arguments. Rename the input arguments so
-    -- the expression resolves correctly.
-    let args_pre = filter (\(glarg, _) -> not $ elem glarg largs) args
-        args' = zipWith (\ix ((i, (t', _))) -> (i, (removePoint t', CIR.EVar $ ExId Input <> Ix ((length largs) + ix)))) [0..] args_pre
-        (tmpix1, stmts1, (_, expr1)) = exprToCExpr tmpix args' tin tout inputs outports e
-        inputs = zip tin inputIds
+    let args' = map (\(i1, (t, i2)) -> (i1, (removePoint t, i2))) args
+        (tmpix1, stmts1, (_, expr1)) = exprToCExpr tmpix args' tin tout (zip tin inputIds) outports e
+        getArgs comp = (find <$> (\(i, _) -> (comp i)) <$> args) <*> [CIR.getVars expr1] >>= maybeToList
+        -- Implicit arguments, i.e. eta-reduced ones
+        implicit = take (length tin - length explicit) $ getArgs (/=)
+        -- Explicit arguments specified by Lams
+        explicit = getArgs (==)
+        inputs = zip tin $ implicit <> explicit
         expr2 = CIR.ELambda [] inputs $ CIR.SScope [CIR.SReturn $ Just expr1]
      in (tmpix1, stmts1, (tout, expr2))
 

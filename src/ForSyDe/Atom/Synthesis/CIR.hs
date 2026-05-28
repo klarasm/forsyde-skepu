@@ -11,6 +11,7 @@ module ForSyDe.Atom.Synthesis.CIR (
   Statement (..),
   Global (..),
   Program (..),
+  getVars
 )
 where
 
@@ -443,3 +444,27 @@ prettyParam (t, i) = pretty t <+> pretty i
 instance (Pretty a) => Pretty (Program a) where
   pretty (Prog globals) =
     vsep . map pretty $ globals
+
+getVars :: Expression a -> [a]
+getVars = go []
+  where
+    go acc = \case
+      EVar v -> v : acc
+      EBinOp _ e1 e2 -> go (go acc e1) e2
+      EUnOp _ e -> go acc e
+      ECall _ el -> foldr (flip go) acc el
+      ECallExpr e el -> foldr (flip go) (go acc e) el
+      EArrayAccess e1 e2 -> go (go acc e1) e2
+      EReference e -> go acc e
+      EDereference e -> go acc e
+      EMemberAccess e _ -> go acc e
+      EPointerAccess e _ -> go acc e
+      EParen e -> go acc e
+      ETernary e1 e2 e3 -> go (go (go acc e1) e2) e3
+      -- EInt _ -> acc
+      -- EFloat _ -> acc
+      -- EChar _ -> acc
+      -- EString _ -> acc
+      -- EStatement _ _ -> acc
+      -- ELambda _ _ _ -> acc
+      _ -> acc
