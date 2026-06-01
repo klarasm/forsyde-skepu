@@ -684,9 +684,9 @@ instance Synthesizable CContext where
                 -- Get the calls to the scheduled processes, passing which
                 -- Ids should be dereferenced or not.
                 schedStmts = map (CIR.SExpr . vertexToExpr pointers) <$> schedVert
-                locals = filter (\v -> not (elem (Direct v) (pointers <> map Direct delaySigs))) . map (\(Edge v _ _) -> v) $ edges
+                locals = S.filter (\v -> not (elem (Direct v) (pointers <> map Direct delaySigs))) . S.fromList . map (\(Edge v _ _) -> v) $ edges
                 -- Get declarations of intermediare signals.
-                localDefs = map ((\(t, s) -> CIR.SVarDecl t s Nothing) . (\(t, n) -> (removePoint t, n)) . varToCDef) locals
+                localDefs = map ((\(t, s) -> CIR.SVarDecl t s Nothing) . (\(t, n) -> (removePoint t, n)) . varToCDef) . S.elems $ locals
                 -- Get definitions of delays and initialise them to their
                 -- previous value.
                 delayTmps = map (\(t, i) -> CIR.SVarDef (removePoint t) i Nothing (CIR.EDereference . CIR.EVar $ i <> ExId Delay)) delayTypes
