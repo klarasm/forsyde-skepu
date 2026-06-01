@@ -386,6 +386,10 @@ exprToCExpr tmpix args tin tout inports outports expr = case expr of
   App (App (Var f) t1) t2
     | typeOrConstraint t1 && typeOrConstraint t2 ->
         resolveOp tmpix [] (take 2 . map snd $ args) tout $ getOccString f
+  -- A unary operator passed as a value. Apply it to the input argument
+  App (Var f) t1
+    | typeOrConstraint t1 ->
+        resolveOp tmpix [] (take 1 . map snd $ args) tout $ getOccString f
   -- An integer literal
   App _ (Lit (LitNumber _ i)) -> (tmpix, [], (CIR.TLong, CIR.EInt $ fromIntegral i))
   Lit (LitNumber _ i) -> (tmpix, [], (CIR.TLong, CIR.EInt $ fromIntegral i))
