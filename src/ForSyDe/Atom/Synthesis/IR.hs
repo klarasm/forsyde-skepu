@@ -162,7 +162,7 @@ data Process = Process
                     -- or constructed from parent system Ids Core binder
   , inports :: [Port] -- ^ The input types of the system
   , outports :: [Port] -- ^ The output types of the system
-  , appliedInternal :: [Id ()] -- ^ Internal applications of binders
+  , appliedInternal :: S.Set (Id ()) -- ^ Internal applications of binders
   , subsystem :: Maybe System -- ^ A subsystem if it exists
   , body :: CoreExpr -- ^ The body of the process
   }
@@ -181,7 +181,7 @@ instance Pretty Process where
           [ pretty binder
           , pretty "inports =" <+> pretty inports
           , pretty "outports =" <+> pretty outports
-          , pretty "appliedInternal =" <+> pretty appliedInternal
+          , pretty "appliedInternal =" <+> (pretty . S.elems) appliedInternal
           , maybe (braces . pretty . showPprUnsafe $ body) pretty subsystem
           ]
 
@@ -366,8 +366,8 @@ makeProcess parent procs = \case
             , subsystem
             , body
             , appliedInternal = case subsystem of
-                Just _ -> []
-                Nothing -> map Direct . getInternal procs [] $ body
+                Just _ -> mempty
+                Nothing -> S.map Direct . getInternal procs mempty $ body
             }
       else Nothing
    where
@@ -383,8 +383,8 @@ makeProcess parent procs = \case
         , subsystem
         , body
         , appliedInternal = case subsystem of
-            Just _ -> []
-            Nothing -> map Direct . getInternal procs [] $ body
+            Just _ -> mempty
+            Nothing -> S.map Direct . getInternal procs mempty $ body
         }
    where
     (inports, outports) = makePorts (varType <$> inputs, varType <$> outputs)
@@ -393,7 +393,7 @@ makeProcess parent procs = \case
 {- | Get all internal function applications of an expression
 This is used to not filter out internal process applications
 -}
-getInternal :: [Process] -> [CoreBndr] -> CoreExpr -> [CoreBndr]
+getInternal :: [Process] -> S.Set CoreBndr -> CoreExpr -> S.Set CoreBndr
 getInternal procs acc = \case
   Let (NonRec _ e1) e2 ->
     let acc' = getInternal procs acc e1
@@ -404,7 +404,7 @@ getInternal procs acc = \case
   Case _ _ _ alts ->
     foldr (\(Alt _ _ e1) a -> getInternal procs a e1) acc alts
   Lam _ e -> getInternal procs acc e
-  Var v | not $ typeOrConstraint (Var v) -> v : acc
+  Var v | not $ typeOrConstraint (Var v) -> S.singleton v <> acc
   App e1 e2 ->
     let acc' = getInternal procs acc e2
      in getInternal procs acc' e1
@@ -685,7 +685,7 @@ findProc var = S.filter (\Process{binder} -> binder == (const () <$> var))
 -- | Helper to find processes from internal references
 findInternal :: S.Set Process -> Process -> S.Set Process
 findInternal reachable Process{appliedInternal} =
-  mconcat $ findProc <$> appliedInternal <*> [reachable]
+  mconcat $ findProc <$> S.elems appliedInternal <*> [reachable]
 
 -- | Find processes referenced by a vertex or its inline process definition
 vertexProcs :: S.Set Process -> Vertex -> S.Set Process
