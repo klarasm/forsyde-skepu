@@ -358,6 +358,10 @@ exprToCExpr tmpix args tin tout inports outports expr = case expr of
       (_, Just (ret, skel), tys, _, [argExpr], argVars) ->
         let (tmpix1, stmts1, (_, e1')) = exprToLambda tmpix ret args (map Direct argVars) (map exprToCType . take (length tin) $ tys) tout inports outports argExpr
          in skelAppToCExpr tmpix1 ret args stmts1 tin tout inports skel e1'
+      -- Vector length (has a weird type due to parametrised output Num a)
+      (Var inner, _, [_, _, _], [e1], _, _) ->
+            let (tmpix1, stmts1, (t1', expr1)) = exprToCExpr tmpix args tin (exprToCType e1) inports outports e1
+             in resolveOp tmpix1 stmts1 [(t1', expr1)] tout $ getOccString inner
       -- A fully applied binary function
       (Var inner, _, [t1, t2], [e1, e2], _, _) ->
             let (tmpix1, stmts1, (t1', expr1)) = exprToCExpr tmpix args tin (exprToCType t1) inports outports e1
