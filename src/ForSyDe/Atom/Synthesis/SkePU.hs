@@ -390,10 +390,10 @@ exprToCExpr tmpix args tin tout inports outports expr = case expr of
   App (Var f) t1
     | typeOrConstraint t1 ->
         resolveOp tmpix [] (take 1 . map snd $ args) tout $ getOccString f
-  -- An integer literal
+  -- Literals
   App _ (Lit (LitNumber _ i)) -> (tmpix, [], (CIR.TLong, CIR.EInt $ fromIntegral i))
   Lit (LitNumber _ i) -> (tmpix, [], (CIR.TLong, CIR.EInt $ fromIntegral i))
-  App _ (Lit (LitFloat f)) -> (tmpix, [], (CIR.TLong, CIR.EFloat $ fromRational f))
+  App _ (Lit (LitFloat f)) -> (tmpix, [], (CIR.TFloat, CIR.EFloat $ fromRational f))
   Lit (LitFloat f) -> (tmpix, [], (CIR.TFloat, CIR.EFloat $ fromRational f))
   App _ (Lit (LitDouble f)) -> (tmpix, [], (CIR.TDouble, CIR.EFloat $ fromRational f))
   Lit (LitDouble f) -> (tmpix, [], (CIR.TDouble, CIR.EFloat $ fromRational f))
