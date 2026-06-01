@@ -335,85 +335,6 @@ decomposeAndSkeleton e = case decomposeExpr e of
 -- possibly statements).
 exprToCExpr :: Int -> [((Id IdExt), (CType, CExpression))] -> [CType] -> CType -> [(CType, Id IdExt)] -> [(CType, Id IdExt)] -> CoreExpr -> (Int, [CStatement], (CType, CExpression))
 exprToCExpr tmpix args tin tout inports outports expr = case expr of
-  -- Inner function applied to a function and a var
-  App (App (App (App (Var inner) t1) t2) e1) e2@(Var v)
-    | typeOrConstraint t1 && typeOrConstraint t2 && (not $ typeOrConstraint e1) && (not $ typeOrConstraint e2) ->
-        case skelToSkePU $ getOccString inner of
-          Just (ret, skel) ->
-            let (tmpix1, stmts1, (_, e1')) = exprToLambda tmpix ret args [Direct v] [exprToCType t1, exprToCType t2] tout inports outports e1
-             in skelAppToCExpr tmpix1 ret args stmts1 tin tout inports skel e1'
-          Nothing ->
-            let (tmpix1, stmts1, (t1', expr1)) = exprToCExpr tmpix args tin (exprToCType t1) inports outports e1
-                (tmpix2, stmts2, (t2', expr2)) = exprToCExpr tmpix1 args tin (exprToCType t2) inports outports e2
-             in resolveOp tmpix2 (stmts1 <> stmts2) [(t1', expr1), (t2', expr2)] tout $ getOccString inner
-  -- Binary operator/function (with type variables)
-  App (App (App (App (Var f) t1) t2) e1) e2
-    | typeOrConstraint t1 && typeOrConstraint t2 && (not $ typeOrConstraint e1) && (not $ typeOrConstraint e2) ->
-        let (tmpix1, stmts1, (_, expr1)) = exprToCExpr tmpix args tin (exprToCType t1) inports outports e1
-            (tmpix2, stmts2, (_, expr2)) = exprToCExpr tmpix1 args tin (exprToCType t2) inports outports e2
-         in resolveOp tmpix2 (stmts1 <> stmts2) [(exprToCType t1, expr1), (exprToCType t2, expr2)] tout $ getOccString f
-  -- Inner function applied to a var
-  App (App (App (App (Var f) t1) t2) t3) e1@(Var v1)
-    | typeOrConstraint t1 && typeOrConstraint t2 && typeOrConstraint t3 && (not $ typeOrConstraint e1) ->
-        case skelToSkePU (getOccString f) of
-          Just (ret, skel) ->
-            let (tmpix1, stmts1, (_, e1')) = exprToLambda tmpix ret args [Direct v1] [exprToCType t1, exprToCType t2] (exprToCType t3) inports outports e1
-             in skelAppToCExpr tmpix1 ret args stmts1 tin tout inports skel e1'
-          -- A little weird
-          Nothing ->
-            let (tmpix1, stmts1, (t1', expr1)) = exprToCExpr tmpix args tin (varToCType v1) inports outports e1
-             in resolveOp tmpix1 stmts1 [(t1', expr1)] tout $ getOccString f
-  -- Inner function applied to an expression
-  App (App (App (App (Var f) t1) t2) t3) e1
-    | typeOrConstraint t1 && typeOrConstraint t2 && typeOrConstraint t3 && (not $ typeOrConstraint e1) ->
-        case skelToSkePU (getOccString f) of
-          Just (ret, skel) ->
-            let (tmpix1, stmts1, (_, e1')) = exprToLambda tmpix ret args [] [exprToCType t1, exprToCType t2] (exprToCType t3) inports outports e1
-             in skelAppToCExpr tmpix1 ret args stmts1 tin tout inports skel e1'
-          Nothing -> error . showPprUnsafe $ e1
-  App (App (App (Var f) t1) t2) e
-    | typeOrConstraint t1 && typeOrConstraint t2 ->
-      case skelToSkePU $ getOccString f of
-        -- A partially applied binary operator passed as a value. Apply it to the input argument
-        -- TODO: look at a better way to handle this than assuming the first argument
-        Nothing ->
-          let (tmpix1, stmts1, (t1', e1)) = exprToCExpr tmpix args tin tout inports outports e
-              v1 = derefTo (exprToCType t1) (fst . head $ inports) $ CIR.EVar $ ExId Input <> Ix 0
-           in resolveOp tmpix1 stmts1 [(t1', e1), (head tin, v1)] tout $ getOccString f
-        -- A skeleton applied to a unary function
-        Just (ret, skel) ->
-            let (tmpix1, stmts1, (_, e1')) = exprToLambda tmpix ret args [] tin tout inports outports e
-             in skelAppToCExpr tmpix1 ret args stmts1 tin tout inports skel e1'
-  -- Inner unary function applied onto an expression and var
-  App (App (App (Var inner) t1) e) (Var v)
-    | typeOrConstraint t1 && (not $ typeOrConstraint e) ->
-        case skelToSkePU (getOccString inner) of
-          Just (ret, skel) ->
-            let (tmpix1, stmts1, (_, e1')) = exprToLambda tmpix ret args [Direct v] [varToCType v] (exprToCType t1) inports outports e
-             in skelAppToCExpr tmpix1 ret args stmts1 tin tout inports skel e1'
-          Nothing -> undefined
-  -- Unary operator/function (with type variables)
-  App (App (Var f) t) (Var v) | typeOrConstraint t && (not $ typeOrConstraint $ Var v) ->
-    case lookup (Direct v) args of
-      Just (_, arg) ->
-        (tmpix, [], (tout, CIR.ECall (Direct f) [arg])) -- should convert this to derefTo
-      Nothing -> error $ "Var not in args! " <> showPprUnsafe expr
-  -- Inner function applied to a function. Apply it to the input arguments
-  App (App (Var inner) t) e
-    | typeOrConstraint t && (not $ typeOrConstraint e) ->
-        case skelToSkePU $ getOccString inner of
-          Nothing -> error $ "Unknown skeleton: " <> getOccString inner
-          Just (ret, skel) ->
-            let (tmpix1, stmts1, (_, e1')) = exprToLambda tmpix ret args [] tin tout inports outports e
-             in skelAppToCExpr tmpix1 ret args stmts1 tin tout inports skel e1'
-  -- A binary operator passed as a value. Apply it to the input arguments
-  App (App (Var f) t1) t2
-    | typeOrConstraint t1 && typeOrConstraint t2 ->
-        resolveOp tmpix [] (take 2 . map snd $ args) tout $ getOccString f
-  -- A unary operator passed as a value. Apply it to the input argument
-  App (Var f) t1
-    | typeOrConstraint t1 ->
-        resolveOp tmpix [] (take 1 . map snd $ args) tout $ getOccString f
   -- Literals
   App _ (Lit (LitNumber _ i)) -> (tmpix, [], (CIR.TLong, CIR.EInt $ fromIntegral i))
   Lit (LitNumber _ i) -> (tmpix, [], (CIR.TLong, CIR.EInt $ fromIntegral i))
@@ -429,13 +350,32 @@ exprToCExpr tmpix args tin tout inports outports expr = case expr of
       let (_, outputs) = makePorts . extractTypes [] . varType $ v
           inArgs = zipWith3 derefTo tin (map fst inports) inputArgs
        in if length outputs == 1
-            then
-              ( tmpix
-              , []
-              , (portToC . head $ outputs, CIR.ECall (Direct v) inArgs)
-              )
+            then (tmpix, [], (portToC . head $ outputs, CIR.ECall (Direct v) inArgs))
             else error "user functions with multiple output is currently unsupported"
-  e -> error . showPprUnsafe $ e
+  e ->
+    case decomposeAndSkeleton e of
+      -- All skeleton applications
+      (_, Just (ret, skel), tys, _, [argExpr], argVars) ->
+        let (tmpix1, stmts1, (_, e1')) = exprToLambda tmpix ret args (map Direct argVars) (map exprToCType . take (length tin) $ tys) tout inports outports argExpr
+         in skelAppToCExpr tmpix1 ret args stmts1 tin tout inports skel e1'
+      -- A fully applied binary function
+      (Var inner, _, [t1, t2], [e1, e2], _, _) ->
+            let (tmpix1, stmts1, (t1', expr1)) = exprToCExpr tmpix args tin (exprToCType t1) inports outports e1
+                (tmpix2, stmts2, (t2', expr2)) = exprToCExpr tmpix1 args tin (exprToCType t2) inports outports e2
+             in resolveOp tmpix2 (stmts1 <> stmts2) [(t1', expr1), (t2', expr2)] tout $ getOccString inner
+      -- A partially applied binary function
+      (Var inner, _, [t1, t2], [e1], _, _) ->
+            let (tmpix1, stmts1, (t1', expr1)) = exprToCExpr tmpix args tin (exprToCType t1) inports outports e1
+                v1 = derefTo (exprToCType t1) (fst . head $ inports) $ CIR.EVar $ ExId Input <> Ix 0
+             in resolveOp tmpix1 stmts1 [(t1', expr1), (exprToCType t2, v1)] tout $ getOccString inner
+      -- An unapplied binary function
+      (Var inner, _, [_, _], [], [], []) ->
+             resolveOp 0 [] (take 2 . map snd $ args) tout $ getOccString inner
+      -- A fully applied unary function
+      (Var inner, _, [t1], [e1], _, _) ->
+            let (tmpix1, stmts1, (t1', expr1)) = exprToCExpr tmpix args tin (exprToCType t1) inports outports e1
+             in resolveOp tmpix1 stmts1 [(t1', expr1)] tout $ getOccString inner
+      _ -> error . showPprUnsafe $ e
 
 -- | Compute the difference in pointer type
 needDeref :: (Num t) => t -> (CIR.Type a1, CIR.Type a2) -> t
