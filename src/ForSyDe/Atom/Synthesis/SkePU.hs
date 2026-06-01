@@ -537,6 +537,8 @@ bodyToStatement inports outports = \case
     | getOccString v == "comb21" -> makeComb inports outports [t1, t2, t3] e
   App (App (App (Var v) t1) t2) e
     | getOccString v == "comb11" -> makeComb inports outports [t1, t2]  e
+  -- A delay only has a single parameterised type, and is therefore only
+  -- specialised with one type application
   App (App (Var v) t) e
     | typeOrConstraint t && getOccString v == "delay" ->
         ( FunArg
