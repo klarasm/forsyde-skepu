@@ -458,10 +458,11 @@ makeComb inports outports tys e =
                   tout2 = exprToCType te2
                   tout3 = exprToCType te3
                   tout4 = exprToCType te4
-                  (cntr, init1, (_, ea1)) = exprToCExpr 0 argMap (map exprToCType tys) tout1 inports outports e1
-                  (cntr1, init2, (_, ea2)) = exprToCExpr cntr argMap (map exprToCType tys) tout2 inports outports e2
-                  (cntr2, init3, (_, ea3)) = exprToCExpr cntr1 argMap (map exprToCType tys) tout3 inports outports e3
-                  (_, init4, (_, ea4)) = exprToCExpr cntr2 argMap (map exprToCType tys) tout4 inports outports e4
+                  tys' = map exprToCType . take (length tys - 4) $ tys
+                  (cntr, init1, (_, ea1)) = exprToCExpr 0 argMap tys' tout1 inports outports e1
+                  (cntr1, init2, (_, ea2)) = exprToCExpr cntr argMap tys' tout2 inports outports e2
+                  (cntr2, init3, (_, ea3)) = exprToCExpr cntr1 argMap tys' tout3 inports outports e3
+                  (_, init4, (_, ea4)) = exprToCExpr cntr2 argMap tys' tout4 inports outports e4
                in ( FunArg
                   , argMap <> outArgs
                   , CIR.SScope $
@@ -480,9 +481,10 @@ makeComb inports outports tys e =
               let tout1 = exprToCType te1
                   tout2 = exprToCType te2
                   tout3 = exprToCType te3
-                  (cntr, init1, (_, ea1)) = exprToCExpr 0 argMap (map exprToCType tys) tout1 inports outports e1
-                  (cntr1, init2, (_, ea2)) = exprToCExpr cntr argMap (map exprToCType tys) tout2 inports outports e2
-                  (_, init3, (_, ea3)) = exprToCExpr cntr1 argMap (map exprToCType tys) tout3 inports outports e3
+                  tys' = map exprToCType . take (length tys - 3) $ tys
+                  (cntr, init1, (_, ea1)) = exprToCExpr 0 argMap tys' tout1 inports outports e1
+                  (cntr1, init2, (_, ea2)) = exprToCExpr cntr argMap tys' tout2 inports outports e2
+                  (_, init3, (_, ea3)) = exprToCExpr cntr1 argMap tys' tout3 inports outports e3
                in ( FunArg
                   , argMap <> outArgs
                   , CIR.SScope $
@@ -498,8 +500,9 @@ makeComb inports outports tys e =
           | getOccString v' == "(,)" ->
               let tout1 = exprToCType te1
                   tout2 = exprToCType te2
-                  (cntr, init1, (_, ea1)) = exprToCExpr 0 argMap (map exprToCType tys) tout1 inports outports e1
-                  (_, init2, (_, ea2)) = exprToCExpr cntr argMap (map exprToCType tys) tout2 inports outports e2
+                  tys' = map exprToCType . take (length tys - 2) $ tys
+                  (cntr, init1, (_, ea1)) = exprToCExpr 0 argMap tys' tout1 inports outports e1
+                  (_, init2, (_, ea2)) = exprToCExpr cntr argMap tys' tout2 inports outports e2
                in ( FunArg
                   , argMap <> outArgs
                   , CIR.SScope $
