@@ -20,8 +20,8 @@ import GHC.Types.Name (getOccString)
 import GHC.Utils.Outputable (showPprUnsafe)
 
 import qualified ForSyDe.Atom.Synthesis.CIR as CIR
-import Data.List (find)
-import Data.Maybe (mapMaybe, maybeToList)
+import Data.List (find, sort)
+import Data.Maybe (mapMaybe)
 import qualified Data.Set as S
 import ForSyDe.Atom.Synthesis.IR as IR
 import Prettyprinter
@@ -262,11 +262,12 @@ exprToLambda tmpix outLoc args largs tin tout inports outports expr = case expr 
   e ->
     let args' = map (\(i1, (t, i2)) -> (i1, (removePoint t, i2))) args
         (tmpix1, stmts1, (_, expr1)) = exprToCExpr tmpix args' tin tout (zip tin inputIds) outports e
-        getArgs comp = (find <$> (\(i, _) -> (comp i)) <$> args) <*> [CIR.getVars expr1] >>= maybeToList
+        inExpr = CIR.getVars expr1
+        explicit = map (\(i, _) -> i) . filter (\(i, _) -> elem i inExpr) $ args'
+        notInArgs = filter (not . flip elem explicit) . sort $ inExpr
         -- Implicit arguments, i.e. eta-reduced ones
-        implicit = take (length tin - length explicit) $ getArgs (/=)
+        implicit = take (length tin - length explicit) $ notInArgs
         -- Explicit arguments specified by Lams
-        explicit = getArgs (==)
         inputs = zip tin $ implicit <> explicit
         expr2 = CIR.ELambda [] inputs $ CIR.SScope [CIR.SReturn $ Just expr1]
      in (tmpix1, stmts1, (tout, expr2))
