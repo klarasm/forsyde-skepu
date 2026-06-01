@@ -308,6 +308,29 @@ skelAppToCExpr tmpix1 ret args stmts1 tin tout inports skel e1' =
           Return -> (tout, call)
       )
 
+-- | Decompose applications to a base expression, types, argument expressions,
+-- and argument vars
+decomposeExpr :: Expr CoreBndr -> (Expr CoreBndr, [Arg CoreBndr], [Expr CoreBndr], [Expr CoreBndr], [CoreBndr])
+decomposeExpr = goVars []
+ where
+  goVars argVars = \case
+    App e1 e2@(Var v) | not . typeOrConstraint $ e2 -> goVars (v : argVars) e1
+    expr -> goExprs [] argVars expr
+  goExprs argExprs argVars = \case
+    App e1 e2 | not . typeOrConstraint $ e2 -> goExprs (e2 : argExprs) argVars e1
+    expr -> goTys [] argExprs argVars expr
+  goTys tys argExprs argVars = \case
+    App e1 t1 | typeOrConstraint t1 -> goTys (t1 : tys) argExprs argVars e1
+    expr -> (expr, tys, argExprs <> map Var argVars, argExprs, argVars)
+
+-- | Decompose expression and check for skeleton
+decomposeAndSkeleton :: Expr CoreBndr -> (Expr CoreBndr, Maybe (OutputLoc, Id IdExt), [Arg CoreBndr], [Expr CoreBndr], [Expr CoreBndr], [CoreBndr])
+decomposeAndSkeleton e = case decomposeExpr e of
+  (base@(Var v), tys, combined, exprs, vars) ->
+    (base, skelToSkePU . getOccString $ v, tys, combined, exprs, vars)
+  (base, tys, combined, exprs, vars) ->
+    (base, Nothing, tys, combined, exprs, vars)
+
 -- | Traverse a GHC Core expression and transform it into a C expression (and
 -- possibly statements).
 exprToCExpr :: Int -> [((Id IdExt), (CType, CExpression))] -> [CType] -> CType -> [(CType, Id IdExt)] -> [(CType, Id IdExt)] -> CoreExpr -> (Int, [CStatement], (CType, CExpression))
