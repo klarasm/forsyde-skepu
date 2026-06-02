@@ -116,7 +116,18 @@ typeToCType = \case
         | getOccString v2' == "Int" -> CIR.TLong
         | getOccString v2' == "Float" -> CIR.TFloat
         | getOccString v2' == "Double" -> CIR.TDouble
-      TyConApp v2' _ -> error . showPprUnsafe $ v2'
+      _ -> error . showPprUnsafe $ v2
+    | getOccString v1 == "Ord" -> case v2 of
+      TyVarTy v2'
+        | getOccString v2' == "Integer" -> CIR.TLong
+        | getOccString v2' == "Int" -> CIR.TLong
+        | getOccString v2' == "Float" -> CIR.TFloat
+        | getOccString v2' == "Double" -> CIR.TDouble
+      TyConApp v2' _
+        | getOccString v2' == "Integer" -> CIR.TLong
+        | getOccString v2' == "Int" -> CIR.TLong
+        | getOccString v2' == "Float" -> CIR.TFloat
+        | getOccString v2' == "Double" -> CIR.TDouble
       _ -> error . showPprUnsafe $ v2
   TyConApp v1 _ | getOccString v1 == "Floating" -> CIR.TFloat
   TyConApp v1 _ | getOccString v1 == "Fractional" -> CIR.TFloat
