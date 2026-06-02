@@ -321,7 +321,7 @@ skelAppToCExpr tmpix1 ret args stmts1 tin tout inports skel e1' =
 
 -- | Decompose applications to a base expression, types, argument expressions,
 -- and argument vars
-decomposeExpr :: Expr CoreBndr -> (Expr CoreBndr, [Arg CoreBndr], [Expr CoreBndr], [Expr CoreBndr], [CoreBndr])
+decomposeExpr :: Expr CoreBndr -> (Expr CoreBndr, [Arg CoreBndr], [Expr CoreBndr], [CoreBndr])
 decomposeExpr = goVars []
  where
   goVars argVars = \case
@@ -332,15 +332,15 @@ decomposeExpr = goVars []
     expr -> goTys [] argExprs argVars expr
   goTys tys argExprs argVars = \case
     App e1 t1 | typeOrConstraint t1 -> goTys (t1 : tys) argExprs argVars e1
-    expr -> (expr, tys, argExprs <> map Var argVars, argExprs, argVars)
+    expr -> (expr, tys, argExprs, argVars)
 
--- | Decompose expression and check for skeleton
-decomposeAndSkeleton :: Expr CoreBndr -> (Expr CoreBndr, Maybe (OutputLoc, Id IdExt), [Arg CoreBndr], [Expr CoreBndr], [Expr CoreBndr], [CoreBndr])
+-- | Decompose expression and check for skeleton and type
+decomposeAndSkeleton :: Expr CoreBndr -> (Expr CoreBndr, Maybe ([Type], [Type]), Maybe (OutputLoc, Id IdExt), [Arg CoreBndr], [Expr CoreBndr], [Expr CoreBndr], [CoreBndr])
 decomposeAndSkeleton e = case decomposeExpr e of
-  (base@(Var v), tys, combined, exprs, vars) ->
-    (base, skelToSkePU . getOccString $ v, tys, combined, exprs, vars)
-  (base, tys, combined, exprs, vars) ->
-    (base, Nothing, tys, combined, exprs, vars)
+  (base@(Var v), tys, exprs, vars) ->
+    (base, Just $ extractTypes [] . varType $ v, skelToSkePU . getOccString $ v, tys, exprs <> map Var vars, exprs, vars)
+  (base, tys, exprs, vars) ->
+    (base, Nothing, Nothing, tys, exprs <> map Var vars, exprs, vars)
 
 -- | Traverse a GHC Core expression and transform it into a C expression (and
 -- possibly statements).
@@ -366,31 +366,34 @@ exprToCExpr tmpix args tin tout inports outports expr = case expr of
   e ->
     case decomposeAndSkeleton e of
       -- All skeleton applications
-      (_, Just (ret, skel), tys, _, [argExpr], argVars) ->
-        let (tmpix1, stmts1, (_, e1')) = exprToLambda tmpix ret args (map Direct argVars) (map exprToCType . take (length tin) $ tys) tout inports outports argExpr
-         in skelAppToCExpr tmpix1 ret args stmts1 tin tout inports skel e1'
-      -- Vector length (has a weird type due to parametrised output Num a)
-      (Var inner, _, [_, _, _], [e1], _, _) ->
+      (_, _, Just (ret, skel), tys, _, [argExpr], argVars) ->
+        let (tmpix1, stmts1, (_, e1)) = exprToLambda tmpix ret args (map Direct argVars) (map exprToCType . take (length tin) $ tys) tout inports outports argExpr
+         in skelAppToCExpr tmpix1 ret args stmts1 tin tout inports skel e1
+      -- Vector length (has a weird type application due to parametrised output Num a)
+      (Var inner, Just ([_], [_]), _, [_, _, _], [e1], _, _) ->
             let (tmpix1, stmts1, (t1', expr1)) = exprToCExpr tmpix args tin (exprToCType e1) inports outports e1
              in resolveOp tmpix1 stmts1 [(t1', expr1)] tout $ getOccString inner
-      -- A fully applied binary function
-      (Var inner, _, [t1, t2], [e1, e2], _, _) ->
+      -- A fully applied binary function (two parametrised types)
+      (Var inner, Just ([_, _], [_]), _, [t1, t2], [e1, e2], _, _) ->
             let (tmpix1, stmts1, (t1', expr1)) = exprToCExpr tmpix args tin (exprToCType t1) inports outports e1
                 (tmpix2, stmts2, (t2', expr2)) = exprToCExpr tmpix1 args tin (exprToCType t2) inports outports e2
              in resolveOp tmpix2 (stmts1 <> stmts2) [(t1', expr1), (t2', expr2)] tout $ getOccString inner
-      -- A partially applied binary function
-      (Var inner, _, [t1, t2], [e1], _, _) ->
+      -- A partially applied binary function (two parametrised types)
+      (Var inner, Just ([_, _], [_]), _, [t1, t2], [e1], _, _) ->
             let (tmpix1, stmts1, (t1', expr1)) = exprToCExpr tmpix args tin (exprToCType t1) inports outports e1
                 v1 = derefTo (exprToCType t1) (fst . head $ inports) $ CIR.EVar $ ExId Input <> Ix 0
              in resolveOp tmpix1 stmts1 [(t1', expr1), (exprToCType t2, v1)] tout $ getOccString inner
-      -- An unapplied binary function
-      (Var inner, _, [_, _], [], [], []) ->
+      -- An unapplied binary function (two parametrised types)
+      (Var inner, Just ([_, _], [_]),  _, [_, _], [], [], []) ->
              resolveOp 0 [] (take 2 . map snd $ args) tout $ getOccString inner
-      -- A fully applied unary function
-      (Var inner, _, [t1], [e1], _, _) ->
+      -- A fully applied unary function (one parametrised type)
+      (Var inner, Just ([_], [_]), _, [t1], [e1], _, _) ->
             let (tmpix1, stmts1, (t1', expr1)) = exprToCExpr tmpix args tin (exprToCType t1) inports outports e1
              in resolveOp tmpix1 stmts1 [(t1', expr1)] tout $ getOccString inner
-      _ -> error . showPprUnsafe $ e
+      -- An unapplied unary function (one parametrised type)
+      (Var inner, Just ([_], [_]),  _, [_], [], [], []) ->
+             resolveOp 0 [] (take 1 . map snd $ args) tout $ getOccString inner
+      (_, ty, _, _, _, _, _) -> error $ showPprUnsafe e <> " " <> showPprUnsafe ty
 
 -- | Compute the difference in pointer type
 needDeref :: (Num t) => t -> (CIR.Type a1, CIR.Type a2) -> t
