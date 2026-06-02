@@ -182,7 +182,7 @@ data OutputLoc
 -- Get the corresponding SkePU skeleton from the function name
 skelToSkePU :: String -> Maybe (OutputLoc, Id IdExt)
 skelToSkePU = \case
-  "reduce" -> Just (Return, ExId Reduce)
+  "reducei" -> Just (Return, ExId Reduce)
   "farm11" -> Just (FunArg, ExId Map <> (ExId $ Name "<1>"))
   "farm12" -> Just (FunArg, ExId Map <> (ExId $ Name "<1>"))
   "farm13" -> Just (FunArg, ExId Map <> (ExId $ Name "<1>"))
@@ -365,7 +365,17 @@ exprToCExpr tmpix args tin tout inports outports expr = case expr of
             else error "user functions with multiple output is currently unsupported"
   e ->
     case decomposeAndSkeleton e of
-      -- All skeleton applications
+      -- Reduce(i)
+      (Var v, _, Just (ret, skel), tys, _, [fun, ini], [input]) | getOccString v == "reducei" ->
+        let (tmpix1, stmts1, (_, eIni)) = exprToCExpr tmpix args tin tout inports outports ini
+            (tmpix2, stmts2, (_, e1)) = exprToLambda tmpix1 ret args [Direct input] (map exprToCType . take (length tin) $ tys) tout inports outports fun
+            (tmpix3, stmts3, (t2, e2)) = skelAppToCExpr tmpix2 ret args (stmts1 <> stmts2) tin tout inports skel e1
+         in case e2 of
+          CIR.ECall skelInstance _ ->
+            let stmts4 = [CIR.SExpr $ CIR.ECallExpr (CIR.EMemberAccess (CIR.EVar skelInstance) (ExId $ Name "setStartValue")) [eIni]]
+            in (tmpix3, stmts1 <> stmts2 <> stmts3 <> stmts4, (t2, e2))
+          _ -> undefined -- This should not happen, skelApptToCExpr will always pass a ECall
+      -- All skeleton farm applications
       (_, _, Just (ret, skel), tys, _, [argExpr], argVars) ->
         let (tmpix1, stmts1, (_, e1)) = exprToLambda tmpix ret args (map Direct argVars) (map exprToCType . take (length tin) $ tys) tout inports outports argExpr
          in skelAppToCExpr tmpix1 ret args stmts1 tin tout inports skel e1
