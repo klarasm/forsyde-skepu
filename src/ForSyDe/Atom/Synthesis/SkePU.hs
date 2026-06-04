@@ -214,6 +214,14 @@ resolveOp tmpix stmts [(t1, expr1)] tout = \case
     CIR.TConstructor _ _ -> (tmpix, stmts, (tout, CIR.ECallExpr (CIR.EMemberAccess e1 (ExId $ Name "size")) []))
     _ -> error $ show t1
   "id" -> (tmpix, stmts, (tout, e1))
+  "exp" -> case t1 of
+    CIR.TDouble -> (tmpix, stmts, (tout, CIR.ECall (ExId $ Name "exp") [e1]))
+    CIR.TFloat -> (tmpix, stmts, (tout, CIR.ECall (ExId $ Name "expf") [e1]))
+    _ -> error $ "Unsupported type for exp: " <> show t1
+  "log" -> case t1 of
+    CIR.TDouble -> (tmpix, stmts, (tout, CIR.ECall (ExId $ Name "log") [e1]))
+    CIR.TFloat -> (tmpix, stmts, (tout, CIR.ECall (ExId $ Name "logf") [e1]))
+    _ -> error $ "Inconsistent types for log: " <> show t1 <> " " <> show tout
   u -> error $ "Unknown unary function: " <> u
  where
   e1 = derefTo tout t1 expr1
@@ -227,6 +235,10 @@ resolveOp tmpix stmts [(t1, expr1), (t2, expr2)] tout = \case
   "const" -> (tmpix, stmts, (tout, e1))
   "max" -> (tmpix, stmts, (tout, CIR.ETernary (CIR.EBinOp CIR.Greater e1 e2) e1 e2))
   "min" -> (tmpix, stmts, (tout, CIR.ETernary (CIR.EBinOp CIR.Less e1 e2) e1 e2))
+  "**" -> case (t1, t2) of
+    (CIR.TDouble, CIR.TDouble) -> (tmpix, stmts, (tout, CIR.ECall (ExId $ Name "pow") [e1, e2]))
+    (CIR.TFloat, CIR.TFloat) -> (tmpix, stmts, (tout, CIR.ECall (ExId $ Name "powf") [e1, e2]))
+    _ -> error $ "Unsupported types for **: " <> show t1 <> " " <> show t2
   u -> error $ "Unknown binary function: " <> u
  where
   e1 = derefTo tout t1 expr1
@@ -241,6 +253,7 @@ exprToLambda tmpix outLoc args largs tin tout inports outports expr = case expr 
   App (App (Var f) t1) t2
     | typeOrConstraint t1 && typeOrConstraint t2 ->
         case makePorts . extractTypes [] . varType $ f of
+          -- A binary function
           (_ : _ : [], _ : []) ->
             let in1 = ExId Input <> Ix 0
                 t1' = exprToCType t1
@@ -248,6 +261,13 @@ exprToLambda tmpix outLoc args largs tin tout inports outports expr = case expr 
                 t2' = exprToCType t2
                 (tmpix', stmts, (_, expr')) = resolveOp tmpix [] [(t1', CIR.EVar in1), (t2', CIR.EVar in2)] tout (getOccString f)
                 expr'' = CIR.ELambda [] [(t1', in1), (t2', in2)] $ CIR.SScope [CIR.SReturn . Just $ expr']
+             in (tmpix', stmts, (tout, expr''))
+          -- A unary function
+          (_ : [], _ : []) ->
+            let in1 = ExId Input <> Ix 0
+                t1' = exprToCType t1
+                (tmpix', stmts, (_, expr')) = resolveOp tmpix [] [(t1', CIR.EVar in1)] tout (getOccString f)
+                expr'' = CIR.ELambda [] [(t1', in1)] $ CIR.SScope [CIR.SReturn . Just $ expr']
              in (tmpix', stmts, (tout, expr''))
           _ -> undefined
   App (App (App (Var f) t1) t2) v1@(Var v)
@@ -773,7 +793,7 @@ instance Synthesizable CContext where
       CIR.TInt -> "%d"
       CIR.TLong -> "%ld"
       CIR.TFloat -> "%f"
-      CIR.TDouble -> "%f"
+      CIR.TDouble -> "%lf"
       CIR.TChar -> "%c"
       CIR.TSizeT -> "%zu"
       t -> error $ "unknown format string for " <> show t
