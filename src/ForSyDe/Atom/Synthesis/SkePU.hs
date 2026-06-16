@@ -222,6 +222,10 @@ resolveOp tmpix stmts [(t1, expr1)] tout = \case
     CIR.TDouble -> (tmpix, stmts, (tout, CIR.ECall (ExId $ Name "log") [e1]))
     CIR.TFloat -> (tmpix, stmts, (tout, CIR.ECall (ExId $ Name "logf") [e1]))
     _ -> error $ "Inconsistent types for log: " <> show t1 <> " " <> show tout
+  "fromIntegral" -> case (t1, tout) of
+    (CIR.TLong, CIR.TDouble) ->
+      (tmpix, stmts, (tout, CIR.ECast (tout) expr1))
+    _ -> error $ "Unsupported type conversion fromIntegral " <> show t1 <> " to " <> show tout
   u -> error $ "Unknown unary function: " <> u
  where
   e1 = derefTo tout t1 expr1
@@ -420,9 +424,17 @@ exprToCExpr tmpix args tin tout inports outports expr = case expr of
       (Var inner, Just ([_], [_]), _, [t1], [e1], _, _) ->
             let (tmpix1, stmts1, (t1', expr1)) = exprToCExpr tmpix args tin (exprToCType t1) inports outports e1
              in resolveOp tmpix1 stmts1 [(t1', expr1)] tout $ getOccString inner
+      -- A fully applied unary function (one parametrised type)
+      (Var inner, Just ([_], [_]), _, [t1, _], [e1], _, _) ->
+            let (tmpix1, stmts1, (t1', expr1)) = exprToCExpr tmpix args tin (exprToCType t1) inports outports e1
+             in resolveOp tmpix1 stmts1 [(t1', expr1)] tout $ getOccString inner
       -- An unapplied unary function (one parametrised type)
       (Var inner, Just ([_], [_]),  _, [_], [], [], []) ->
              resolveOp 0 [] (take 1 . map snd $ args) tout $ getOccString inner
+      -- A fully applied unary function (two parametrised types, two type variables)
+      (Var inner, Just ([_], [_]), _, [t1, t2, _, _], [e1], _, _) ->
+        let (tmpix1, stmts1, (t1', e1')) = exprToCExpr tmpix args tin (exprToCType t1) inports outports e1
+        in resolveOp tmpix1 stmts1 [(t1', e1')] (exprToCType t2) $ getOccString inner
       (_, ty, _, _, _, _, _) -> error $ showPprUnsafe e <> " " <> showPprUnsafe ty
 
 -- | Compute the difference in pointer type
