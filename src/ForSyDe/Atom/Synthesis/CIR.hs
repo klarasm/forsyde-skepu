@@ -300,10 +300,10 @@ instance (Pretty a) => Pretty (Expression a) where
       pretty capture
         <> parens (hsep . punctuate comma $ (map prettyParam params))
           <+> pretty body
-    ETernary cond true false ->
-      lparen <> pretty cond <> rparen <+> pretty "?"
-        <+> lparen <> pretty true <> rparen <+> colon
-        <+> lparen <> pretty false <> rparen
+    ETernary cond true false -> parens $
+      parens (pretty cond) <+> pretty "?"
+        <+> parens (pretty true) <+> colon
+        <+> parens (pretty false)
     ECast ty expr -> parens (pretty ty) <> parens (pretty expr)
 
 instance (Pretty a) => Pretty (Statement a) where
