@@ -388,7 +388,7 @@ makeProcess parent procs = \case
         }
    where
     (inports, outports) = makePorts (varType <$> inputs, varType <$> outputs)
-    subsystem = translateExpr parent procs body
+    subsystem = translateExpr (parent <> Ix ix) procs body
 
 {- | Get all internal function applications of an expression
 This is used to not filter out internal process applications
