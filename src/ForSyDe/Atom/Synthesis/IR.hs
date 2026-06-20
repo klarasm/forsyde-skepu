@@ -539,10 +539,6 @@ getSignals bindacc inputAcc acc = \case
     let sigs' = filter isSignal sigs
         b = map fst sigs'
      in getSignals (b <> bindacc) inputAcc (sigs' <> acc) inExpr
-  Lam a e ->
-    if typeOrConstraint (Var a)
-      then getSignals bindacc inputAcc acc e
-      else getSignals (a : bindacc) inputAcc acc e
   -- Add any top-level deconstructed input tuple mapping
   Case (Var v) _ _ (Alt (DataAlt dc) b e : _)
     | elem v bindacc && isTupleDataCon dc ->
