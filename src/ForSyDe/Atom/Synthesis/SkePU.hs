@@ -390,9 +390,9 @@ exprToCExpr tmpix args tin tout inports outports expr = case expr of
   e ->
     case decomposeAndSkeleton e of
       -- Reduce(i)
-      (Var v, _, Just (ret, skel), tys, _, [fun, ini], [input]) | getOccString v == "reducei" ->
+      (Var v, _, Just (ret, skel), tys, _, [fun, ini], input) | getOccString v == "reducei" ->
         let (tmpix1, stmts1, (_, eIni)) = exprToCExpr tmpix args tin tout inports outports ini
-            (tmpix2, stmts2, (_, e1)) = exprToLambda tmpix1 ret args [Direct input] (map exprToCType . take (length tin) $ tys) tout inports outports fun
+            (tmpix2, stmts2, (_, e1)) = exprToLambda tmpix1 ret args (map Direct input) (map exprToCType . take (length tin) $ tys) tout inports outports fun
             (tmpix3, stmts3, (t2, e2)) = skelAppToCExpr tmpix2 ret args (stmts1 <> stmts2) tin tout inports skel e1
          in case e2 of
           CIR.ECall skelInstance _ ->
