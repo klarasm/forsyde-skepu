@@ -551,48 +551,37 @@ makeComb inports outports tys e =
 bodyToStatement :: [(CType, Id IdExt)] -> [(CType, Id IdExt)] -> CoreExpr -> (OutputLoc, [((Id IdExt), (CType, CExpression))], CStatement)
 bodyToStatement inports outports = \case
   App (App (App (App (App (App (App (App (App (App (App (App (App (Var v) t1) t2) t3) t4) t5) t6) t7) t8) t9) t10) t11) t12) e
-    | getOccString v == "comb84" -> makeComb inports outports [t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11, t12] e
+    | getOccString v == "comb84" ->
+        makeComb inports outports [t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11, t12] e
   App (App (App (App (App (App (App (App (App (App (App (App (Var v) t1) t2) t3) t4) t5) t6) t7) t8) t9) t10) t11) e
-    | getOccString v == "comb74" -> makeComb inports outports [t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11] e
-    | getOccString v == "comb83" -> makeComb inports outports [t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11] e
+    | getOccString v == "comb74" || getOccString v == "comb83" ->
+        makeComb inports outports [t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11] e
   App (App (App (App (App (App (App (App (App (App (App (Var v) t1) t2) t3) t4) t5) t6) t7) t8) t9) t10) e
-    | getOccString v == "comb64" -> makeComb inports outports [t1, t2, t3, t4, t5, t6, t7, t8, t9, t10] e
-    | getOccString v == "comb73" -> makeComb inports outports [t1, t2, t3, t4, t5, t6, t7, t8, t9, t10] e
-    | getOccString v == "comb82" -> makeComb inports outports [t1, t2, t3, t4, t5, t6, t7, t8, t9, t10] e
+    | getOccString v == "comb64" || getOccString v == "comb73" || getOccString v == "comb82" ->
+        makeComb inports outports [t1, t2, t3, t4, t5, t6, t7, t8, t9, t10] e
   App (App (App (App (App (App (App (App (App (App (Var v) t1) t2) t3) t4) t5) t6) t7) t8) t9) e
-    | getOccString v == "comb54" -> makeComb inports outports [t1, t2, t3, t4, t5, t6, t7, t8, t9] e
-    | getOccString v == "comb63" -> makeComb inports outports [t1, t2, t3, t4, t5, t6, t7, t8, t9] e
-    | getOccString v == "comb72" -> makeComb inports outports [t1, t2, t3, t4, t5, t6, t7, t8, t9] e
-    | getOccString v == "comb81" -> makeComb inports outports [t1, t2, t3, t4, t5, t6, t7, t8, t9] e
+    | getOccString v == "comb54" || getOccString v == "comb63" || getOccString v == "comb72" || getOccString v == "comb81" ->
+        makeComb inports outports [t1, t2, t3, t4, t5, t6, t7, t8, t9] e
   App (App (App (App (App (App (App (App (App (Var v) t1) t2) t3) t4) t5) t6) t7) t8) e
-    | getOccString v == "comb44" -> makeComb inports outports [t1, t2, t3, t4, t5, t6, t7, t8] e
-    | getOccString v == "comb53" -> makeComb inports outports [t1, t2, t3, t4, t5, t6, t7, t8] e
-    | getOccString v == "comb62" -> makeComb inports outports [t1, t2, t3, t4, t5, t6, t7, t8] e
-    | getOccString v == "comb71" -> makeComb inports outports [t1, t2, t3, t4, t5, t6, t7, t8] e
+    | getOccString v == "comb44" || getOccString v == "comb53" || getOccString v == "comb62" || getOccString v == "comb71" ->
+        makeComb inports outports [t1, t2, t3, t4, t5, t6, t7, t8] e
   App (App (App (App (App (App (App (App (Var v) t1) t2) t3) t4) t5) t6) t7) e
-    | getOccString v == "comb34" -> makeComb inports outports [t1, t2, t3, t4, t5, t6, t7] e
-    | getOccString v == "comb43" -> makeComb inports outports [t1, t2, t3, t4, t5, t6, t7] e
-    | getOccString v == "comb52" -> makeComb inports outports [t1, t2, t3, t4, t5, t6, t7] e
-    | getOccString v == "comb61" -> makeComb inports outports [t1, t2, t3, t4, t5, t6, t7] e
+    | getOccString v == "comb34" || getOccString v == "comb43" || getOccString v == "comb52" || getOccString v == "comb61" ->
+        makeComb inports outports [t1, t2, t3, t4, t5, t6, t7] e
   App (App (App (App (App (App (App (Var v) t1) t2) t3) t4) t5) t6) e
-    | getOccString v == "comb24" -> makeComb inports outports [t1, t2, t3, t4, t5, t6] e
-    | getOccString v == "comb33" -> makeComb inports outports [t1, t2, t3, t4, t5, t6] e
-    | getOccString v == "comb42" -> makeComb inports outports [t1, t2, t3, t4, t5, t6] e
-    | getOccString v == "comb51" -> makeComb inports outports [t1, t2, t3, t4, t5, t6] e
+    | getOccString v == "comb24" || getOccString v == "comb33" || getOccString v == "comb42" || getOccString v == "comb51" ->
+        makeComb inports outports [t1, t2, t3, t4, t5, t6] e
   App (App (App (App (App (App (Var v) t1) t2) t3) t4) t5) e
-    | getOccString v == "comb14" -> makeComb inports outports [t1, t2, t3, t4, t5] e
-    | getOccString v == "comb23" -> makeComb inports outports [t1, t2, t3, t4, t5] e
-    | getOccString v == "comb32" -> makeComb inports outports [t1, t2, t3, t4, t5] e
-    | getOccString v == "comb41" -> makeComb inports outports [t1, t2, t3, t4, t5] e
+    | getOccString v == "comb14" || getOccString v == "comb23" || getOccString v == "comb32" || getOccString v == "comb41" ->
+        makeComb inports outports [t1, t2, t3, t4, t5] e
   App (App (App (App (App (Var v) t1) t2) t3) t4) e
-    | getOccString v == "comb13" -> makeComb inports outports [t1, t2, t3, t4] e
-    | getOccString v == "comb22" -> makeComb inports outports [t1, t2, t3, t4] e
-    | getOccString v == "comb31" -> makeComb inports outports [t1, t2, t3, t4] e
+    | getOccString v == "comb13" || getOccString v == "comb22" || getOccString v == "comb31" ->
+        makeComb inports outports [t1, t2, t3, t4] e
   App (App (App (App (Var v) t1) t2) t3) e
-    | getOccString v == "comb12" -> makeComb inports outports [t1, t2, t3] e
-    | getOccString v == "comb21" -> makeComb inports outports [t1, t2, t3] e
+    | getOccString v == "comb12" || getOccString v == "comb21" ->
+        makeComb inports outports [t1, t2, t3] e
   App (App (App (Var v) t1) t2) e
-    | getOccString v == "comb11" -> makeComb inports outports [t1, t2]  e
+    | getOccString v == "comb11" -> makeComb inports outports [t1, t2] e
   -- A delay only has a single parameterised type, and is therefore only
   -- specialised with one type application
   App (App (Var v) t) e
