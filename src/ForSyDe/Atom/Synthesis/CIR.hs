@@ -1,5 +1,5 @@
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE LambdaCase #-}
 
 module ForSyDe.Atom.Synthesis.CIR (
   StorageClass (..),
@@ -11,12 +11,12 @@ module ForSyDe.Atom.Synthesis.CIR (
   Statement (..),
   Global (..),
   Program (..),
-  getVars
+  getVars,
 )
 where
 
-import Prettyprinter
 import Data.Data (Data, Typeable)
+import Prettyprinter
 
 data StorageClass
   = Auto
@@ -236,7 +236,7 @@ instance Functor Global where
     GStruct n membs -> GStruct (f n) (map (parmFmap f) membs)
     GMacro n args -> GMacro (f n) (map f args)
 
-parmFmap :: Functor f => (a -> b) -> (f a, a) -> (f b, b)
+parmFmap :: (Functor f) => (a -> b) -> (f a, a) -> (f b, b)
 parmFmap f (t, n) = (f <$> t, f n)
 
 data Program a = Prog [Global a]
@@ -300,10 +300,13 @@ instance (Pretty a) => Pretty (Expression a) where
       pretty capture
         <> parens (hsep . punctuate comma $ (map prettyParam params))
           <+> pretty body
-    ETernary cond true false -> parens $
-      parens (pretty cond) <+> pretty "?"
-        <+> parens (pretty true) <+> colon
-        <+> parens (pretty false)
+    ETernary cond true false ->
+      parens $
+        parens (pretty cond)
+          <+> pretty "?"
+          <+> parens (pretty true)
+          <+> colon
+          <+> parens (pretty false)
     ECast ty expr -> parens (pretty ty) <> parens (pretty expr)
 
 instance (Pretty a) => Pretty (Statement a) where
@@ -450,24 +453,24 @@ instance (Pretty a) => Pretty (Program a) where
 
 getVars :: Expression a -> [a]
 getVars = go []
-  where
-    go acc = \case
-      EVar v -> v : acc
-      EBinOp _ e1 e2 -> go (go acc e1) e2
-      EUnOp _ e -> go acc e
-      ECall _ el -> foldr (flip go) acc el
-      ECallExpr e el -> foldr (flip go) (go acc e) el
-      EArrayAccess e1 e2 -> go (go acc e1) e2
-      EReference e -> go acc e
-      EDereference e -> go acc e
-      EMemberAccess e _ -> go acc e
-      EPointerAccess e _ -> go acc e
-      EParen e -> go acc e
-      ETernary e1 e2 e3 -> go (go (go acc e1) e2) e3
-      -- EInt _ -> acc
-      -- EFloat _ -> acc
-      -- EChar _ -> acc
-      -- EString _ -> acc
-      -- EStatement _ _ -> acc
-      -- ELambda _ _ _ -> acc
-      _ -> acc
+ where
+  go acc = \case
+    EVar v -> v : acc
+    EBinOp _ e1 e2 -> go (go acc e1) e2
+    EUnOp _ e -> go acc e
+    ECall _ el -> foldr (flip go) acc el
+    ECallExpr e el -> foldr (flip go) (go acc e) el
+    EArrayAccess e1 e2 -> go (go acc e1) e2
+    EReference e -> go acc e
+    EDereference e -> go acc e
+    EMemberAccess e _ -> go acc e
+    EPointerAccess e _ -> go acc e
+    EParen e -> go acc e
+    ETernary e1 e2 e3 -> go (go (go acc e1) e2) e3
+    -- EInt _ -> acc
+    -- EFloat _ -> acc
+    -- EChar _ -> acc
+    -- EString _ -> acc
+    -- EStatement _ _ -> acc
+    -- ELambda _ _ _ -> acc
+    _ -> acc

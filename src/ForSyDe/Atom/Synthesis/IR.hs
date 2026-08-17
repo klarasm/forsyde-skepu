@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
@@ -5,7 +6,6 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE NoFieldSelectors #-}
-{-# LANGUAGE DeriveDataTypeable #-}
 
 module ForSyDe.Atom.Synthesis.IR (
   System (..),
@@ -127,15 +127,23 @@ showSloppy = \case
 
 -- | A system containing mainly processes, vertices and edges.
 data System = System
-  { inputs :: [Var] -- ^ The system input binders
-  , outputs :: [Var] -- ^ The system output binders
-  , processes :: [Process] -- ^ Processes defined in the system
-  , vertices :: [Vertex] -- ^ Vertices inside the system
-  , edges :: [Edge] -- ^ Edges between vertices local to the system
-  , graph :: Maybe G.Graph -- ^ Dependencies excluding delay edges
-  , schedule :: Maybe [Int] -- ^ A schedule if one can be computed
+  { inputs :: [Var]
+  -- ^ The system input binders
+  , outputs :: [Var]
+  -- ^ The system output binders
+  , processes :: [Process]
+  -- ^ Processes defined in the system
+  , vertices :: [Vertex]
+  -- ^ Vertices inside the system
+  , edges :: [Edge]
+  -- ^ Edges between vertices local to the system
+  , graph :: Maybe G.Graph
+  -- ^ Dependencies excluding delay edges
+  , schedule :: Maybe [Int]
+  -- ^ A schedule if one can be computed
   }
   deriving (Data, Typeable)
+
 instance Show System where
   show = show . pretty
 instance Pretty System where
@@ -158,15 +166,23 @@ instance Pretty System where
 
 -- | A process constructor applied to a function, but not connected in a network.
 data Process = Process
-  { binder :: Id () -- ^ The constructed Id of the process, either from a
-                    -- or constructed from parent system Ids Core binder
-  , inports :: [Port] -- ^ The input types of the system
-  , outports :: [Port] -- ^ The output types of the system
-  , appliedInternal :: S.Set (Id ()) -- ^ Internal applications of binders
-  , subsystem :: Maybe System -- ^ A subsystem if it exists
-  , body :: CoreExpr -- ^ The body of the process
+  { binder :: Id ()
+  {- ^ The constructed Id of the process, either from a
+  or constructed from parent system Ids Core binder
+  -}
+  , inports :: [Port]
+  -- ^ The input types of the system
+  , outports :: [Port]
+  -- ^ The output types of the system
+  , appliedInternal :: S.Set (Id ())
+  -- ^ Internal applications of binders
+  , subsystem :: Maybe System
+  -- ^ A subsystem if it exists
+  , body :: CoreExpr
+  -- ^ The body of the process
   }
   deriving (Data, Typeable)
+
 instance Eq Process where
   (==) Process{binder = b1} Process{binder = b2} = b1 == b2
 instance Ord Process where
@@ -185,20 +201,28 @@ instance Pretty Process where
           , maybe (braces . pretty . showPprUnsafe $ body) pretty subsystem
           ]
 
--- | A process connected in a network.
--- It must therefore have at least an output.
--- A vertex can only be referred to inside the same system, since it represents
--- an application of a process inside the system. This means the id only needs
--- to be unique inside the system.
+{- | A process connected in a network.
+It must therefore have at least an output.
+A vertex can only be referred to inside the same system, since it represents
+an application of a process inside the system. This means the id only needs
+to be unique inside the system.
+-}
 data Vertex = Vertex
-  { id :: Int -- ^ The Id of the vertex. It is only unique within its system
-  , process :: Either (Id ()) Process -- ^ The Id of the applied process or its
-                                      -- definition if inline
-  , inputs :: [Var] -- ^ Input signals
-  , outputs :: [Var] -- ^ Output signals
-  , delay :: Bool -- ^ If the vertex delays its output
+  { id :: Int
+  -- ^ The Id of the vertex. It is only unique within its system
+  , process :: Either (Id ()) Process
+  {- ^ The Id of the applied process or its
+  definition if inline
+  -}
+  , inputs :: [Var]
+  -- ^ Input signals
+  , outputs :: [Var]
+  -- ^ Output signals
+  , delay :: Bool
+  -- ^ If the vertex delays its output
   }
   deriving (Data, Typeable)
+
 instance Show Vertex where
   show = show . pretty
 instance Pretty Vertex where
@@ -218,11 +242,15 @@ instance Ord Vertex where
 
 -- | An edge (signal) inside a system. Can only refer to local vertices.
 data Edge = Edge
-  { binder :: Var -- ^ The Core binder of the signal
-  , source :: Int -- ^ The source vertex
-  , target :: Int -- ^ The target vertex
+  { binder :: Var
+  -- ^ The Core binder of the signal
+  , source :: Int
+  -- ^ The source vertex
+  , target :: Int
+  -- ^ The target vertex
   }
   deriving (Data, Typeable)
+
 instance Show Edge where
   show = show . pretty
 instance Pretty Edge where
@@ -237,10 +265,14 @@ instance Pretty Edge where
 
 -- | A repackaging of the Core types for easier recognition
 data Port
-  = Opaque Type -- ^ A plain Core type
-  | AbstExt Port Type -- ^ The representation of a presence or absence of an event
-  | Signal Port Type String -- ^ A signal type with its module string
-  | Vector Port Type -- ^ A vector type
+  = -- | A plain Core type
+    Opaque Type
+  | -- | The representation of a presence or absence of an event
+    AbstExt Port Type
+  | -- | A signal type with its module string
+    Signal Port Type String
+  | -- | A vector type
+    Vector Port Type
   deriving (Data, Typeable)
 
 instance Show Port where
@@ -260,8 +292,9 @@ instance Pretty Port where
       pretty "VectorPort"
         <> (parens . pretty) inner
 
--- | Translate a Core program into a top-level system. The top-level system
--- itself only contains a list of processes.
+{- | Translate a Core program into a top-level system. The top-level system
+itself only contains a list of processes.
+-}
 translate :: CoreProgram -> System
 translate f =
   System
@@ -421,8 +454,9 @@ typeOrConstraint = \case
 moduleString :: Name -> String
 moduleString = moduleNameString . moduleName . nameModule
 
--- | Traverse an expression and try to make a system out of it with at least
--- one vertex.
+{- | Traverse an expression and try to make a system out of it with at least
+one vertex.
+-}
 translateExpr :: Id a -> [Process] -> CoreExpr -> Maybe System
 translateExpr parent procs expr' = out
  where
@@ -477,8 +511,9 @@ isDelayVertex vertices vid =
     _ : [] -> True
     _ -> False
 
--- | True if the Core binder's string is delay and comes from ForSyDe-Atom
--- synchronous MoC
+{- | True if the Core binder's string is delay and comes from ForSyDe-Atom
+synchronous MoC
+-}
 isDelayVar :: Var -> Bool
 isDelayVar v =
   getOccString v == "delay"
@@ -491,14 +526,17 @@ isDelayProcess Process{body} = isDelayExpr body
   isDelayExpr = \case
     App (App (Var delay) _) _ -> isDelayVar delay
     App (App (App (App (App (Var composition) t1) t2) t3) e1) e2
-      | typeOrConstraint t1 && typeOrConstraint t2 && typeOrConstraint t3
-        && getOccString composition == "."
-          -> isDelayExpr e1 || isDelayExpr e2
+      | typeOrConstraint t1
+          && typeOrConstraint t2
+          && typeOrConstraint t3
+          && getOccString composition == "." ->
+          isDelayExpr e1 || isDelayExpr e2
     _ -> False
 
--- | Traverse an expression and create processes. Note that this will create
--- processes for all non-recursive Let binds, meaning the output has to be
--- filtered for signals.
+{- | Traverse an expression and create processes. Note that this will create
+processes for all non-recursive Let binds, meaning the output has to be
+filtered for signals.
+-}
 getProcesses :: Id a -> [Process] -> CoreExpr -> [Process]
 getProcesses parent acc = \case
   Lam _ e -> getProcesses parent acc e
@@ -616,8 +654,8 @@ makeVertex parent procs ix = \case
         , inputs
         , outputs
         , delay = case filter isDelayProcess . procsFromId (Direct bind) $ procs of
-          [] -> False
-          _ -> True
+            [] -> False
+            _ -> True
         }
   -- An application of an inline process definition
   (expr, inputs, outputs) -> do
@@ -632,12 +670,13 @@ makeVertex parent procs ix = \case
         , delay = isDelayProcess proc
         }
 
--- | Match binders with targets and source from vertices. Note that multiple
--- sources should never happen in practice. While GHC Uniques are not
--- guarranteed to actually be unique and can shadow, this should never happen
--- inside a system definition and should generate an error prior to Core
--- generation. Should this happen anyway, it will likely produce a self-edge
--- meaning the system won't be schedulable.
+{- | Match binders with targets and source from vertices. Note that multiple
+sources should never happen in practice. While GHC Uniques are not
+guarranteed to actually be unique and can shadow, this should never happen
+inside a system definition and should generate an error prior to Core
+generation. Should this happen anyway, it will likely produce a self-edge
+meaning the system won't be schedulable.
+-}
 makeEdge :: [Vertex] -> CoreBndr -> [Edge]
 makeEdge vertices bind = [Edge bind] <*> source <*> targets
  where
