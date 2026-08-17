@@ -154,14 +154,6 @@ varToCDef v =
       name = Direct v
    in (ty, name)
 
--- | Extract the initial value of a delay
-delayExprToC :: CoreExpr -> CExpression
-delayExprToC = \case
-  App (Var _) (Lit (LitNumber _ i)) -> CIR.EInt . fromIntegral $ i
-  App _ (Lit (LitFloat f)) -> CIR.EFloat $ fromRational f
-  App _ (Lit (LitDouble f)) -> CIR.EFloat $ fromRational f
-  _ -> undefined
-
 inputIds :: [Id IdExt]
 inputIds = map ((ExId Input <>) . Ix) [0 ..]
 inputArgs :: [CExpression]
@@ -586,10 +578,18 @@ bodyToStatement inports outports = \case
   -- specialised with one type application
   App (App (Var v) t) e
     | typeOrConstraint t && getOccString v == "delay" ->
+        let (_, _, (_, delayExpr)) = exprToCExpr 0 [] [exprToCType t] (exprToCType t) inports outports e
+        in
         ( FunArg
         , map (\(t', i) -> (i, (t', CIR.EVar i))) (inports <> outports)
-            <> zipWith (\i (t', _) -> (i, (t', delayExprToC e))) [ExId Delay] outports
-        , delayBody
+            <> zipWith (\i (t', _) -> (i, (t', delayExpr))) [ExId Delay] outports
+        -- The delay can both be used on intermediary signals and input/output
+        -- signals. When used on an output signal, it needs to also output the
+        -- current value of the delay, hence the shuffling of values.
+        , CIR.SScope
+          [ CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 0) (CIR.EDereference . CIR.EVar $ ExId Delay)
+          , CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Delay) (CIR.EDereference . CIR.EVar $ ExId Input <> Ix 0)
+          ]
         )
   -- Might be a regular function, i.e. not a process
   e ->
@@ -602,15 +602,6 @@ bodyToStatement inports outports = \case
             stmts
               <> [CIR.SReturn . Just $ expr]
         )
-  where
-    -- The delay can both be used on intermediary signals and input/output
-    -- signals. When used on an output signal, it needs to also output the
-    -- current value of the delay, hence the shuffling of values.
-    delayBody =
-      CIR.SScope
-        [ CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 0) (CIR.EDereference . CIR.EVar $ ExId Delay)
-        , CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Delay) (CIR.EDereference . CIR.EVar $ ExId Input <> Ix 0)
-        ]
 
 removePoint :: CIR.Type a -> CIR.Type a
 removePoint = \case
