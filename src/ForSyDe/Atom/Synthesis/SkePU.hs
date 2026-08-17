@@ -12,6 +12,7 @@ module ForSyDe.Atom.Synthesis.SkePU (
 ) where
 
 import GHC.Core
+import GHC.Core.TyCo.Compare
 import GHC.Core.TyCo.Rep
 import GHC.Core.TyCon
 import GHC.Core.Type
@@ -400,36 +401,36 @@ exprToCExpr tmpix args tin tout inports outports expr = case expr of
       (_, _, Just (ret, skel), tys, _, [argExpr], argVars) ->
         let (tmpix1, stmts1, (_, e1)) = exprToLambda tmpix ret args (map Direct argVars) (map exprToCType . take (length tin) $ tys) tout inports outports argExpr
          in skelAppToCExpr tmpix1 ret args stmts1 tin tout inports skel e1
-      -- Vector length (has a weird type application due to parametrised output Num a)
-      (Var inner, Just ([_], [_]), _, [_, _, _], [e1], _, _) ->
+      -- Vector length (two parametrised types and one type constraint)
+      (Var inner, Just ([tv], [tvout]), _, [_, _, _], [e1], _, _) | not $ tv `eqType` tvout ->
         let (tmpix1, stmts1, (t1', expr1)) = exprToCExpr tmpix args tin (exprToCType e1) inports outports e1
          in resolveOp tmpix1 stmts1 [(t1', expr1)] tout $ getOccString inner
-      -- A fully applied binary function (two parametrised types)
-      (Var inner, Just ([_, _], [_]), _, [t1, t2], [e1, e2], _, _) ->
+      -- A fully applied binary function (one parametrised type and one type constraint)
+      (Var inner, Just ([tv1, tv2], [tvout]), _, [t1, _], [e1, e2], _, _)  | tv1 `eqType` tvout && tv2 `eqType` tvout ->
         let (tmpix1, stmts1, (t1', expr1)) = exprToCExpr tmpix args tin (exprToCType t1) inports outports e1
-            (tmpix2, stmts2, (t2', expr2)) = exprToCExpr tmpix1 args tin (exprToCType t2) inports outports e2
+            (tmpix2, stmts2, (t2', expr2)) = exprToCExpr tmpix1 args tin (exprToCType t1) inports outports e2
          in resolveOp tmpix2 (stmts1 <> stmts2) [(t1', expr1), (t2', expr2)] tout $ getOccString inner
-      -- A partially applied binary function (two parametrised types)
-      (Var inner, Just ([_, _], [_]), _, [t1, t2], [e1], _, _) ->
+      -- A partially applied binary function (one parametrised type and one type constraint)
+      (Var inner, Just ([tv1, tv2], [tvout]), _, [t1, _], [e1], _, _) | tv1 `eqType` tvout && tv2 `eqType` tvout ->
         let (tmpix1, stmts1, (t1', expr1)) = exprToCExpr tmpix args tin (exprToCType t1) inports outports e1
             v1 = derefTo (exprToCType t1) (fst . head $ inports) $ CIR.EVar $ ExId Input <> Ix 0
-         in resolveOp tmpix1 stmts1 [(t1', expr1), (exprToCType t2, v1)] tout $ getOccString inner
-      -- An unapplied binary function (two parametrised types)
-      (Var inner, Just ([_, _], [_]), _, [_, _], [], [], []) ->
+         in resolveOp tmpix1 stmts1 [(t1', expr1), (exprToCType t1, v1)] tout $ getOccString inner
+      -- An unapplied binary function (one parametrised type and one type constraint)
+      (Var inner, Just ([tv1, tv2], [tvout]), _, [_, _], [], [], []) | tv1 `eqType` tvout && tv2 `eqType` tvout->
         resolveOp 0 [] (take 2 . map snd $ args) tout $ getOccString inner
       -- A fully applied unary function (one parametrised type)
-      (Var inner, Just ([_], [_]), _, [t1], [e1], _, _) ->
+      (Var inner, Just ([tv], [tvout]), _, [t1], [e1], _, _) | tv `eqType` tvout ->
         let (tmpix1, stmts1, (t1', expr1)) = exprToCExpr tmpix args tin (exprToCType t1) inports outports e1
          in resolveOp tmpix1 stmts1 [(t1', expr1)] tout $ getOccString inner
       -- A fully applied unary function (one parametrised type)
-      (Var inner, Just ([_], [_]), _, [t1, _], [e1], _, _) ->
+      (Var inner, Just ([tv], [tvout]), _, [t1, _], [e1], _, _) | tv `eqType` tvout ->
         let (tmpix1, stmts1, (t1', expr1)) = exprToCExpr tmpix args tin (exprToCType t1) inports outports e1
          in resolveOp tmpix1 stmts1 [(t1', expr1)] tout $ getOccString inner
       -- An unapplied unary function (one parametrised type)
-      (Var inner, Just ([_], [_]), _, [_], [], [], []) ->
+      (Var inner, Just ([tv], [tvout]), _, [_], [], [], []) | tv `eqType` tvout ->
         resolveOp 0 [] (take 1 . map snd $ args) tout $ getOccString inner
-      -- A fully applied unary function (two parametrised types, two type variables)
-      (Var inner, Just ([_], [_]), _, [t1, t2, _, _], [e1], _, _) ->
+      -- A fully applied unary function (two parametrised types and two type constraints. e.g. fromIntegral)
+      (Var inner, Just ([tv], [tvout]), _, [t1, t2, _, _], [e1], _, _) | not $ tv `eqType` tvout ->
         let (tmpix1, stmts1, (t1', e1')) = exprToCExpr tmpix args tin (exprToCType t1) inports outports e1
          in resolveOp tmpix1 stmts1 [(t1', e1')] (exprToCType t2) $ getOccString inner
       (_, ty, _, _, _, _, _) -> error $ showPprUnsafe e <> " " <> showPprUnsafe ty
