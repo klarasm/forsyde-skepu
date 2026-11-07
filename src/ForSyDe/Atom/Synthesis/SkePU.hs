@@ -372,8 +372,8 @@ exprToCExpr tmpix args tin tout inports outports expr = case expr of
   Lit (LitNumber _ i) -> (tmpix, [], (CIR.TLong, CIR.EInt $ fromIntegral i))
   App _ (Lit (LitFloat f)) -> (tmpix, [], (CIR.TFloat, CIR.EFloat $ fromRational f))
   Lit (LitFloat f) -> (tmpix, [], (CIR.TFloat, CIR.EFloat $ fromRational f))
-  App _ (Lit (LitDouble f)) -> (tmpix, [], (CIR.TDouble, CIR.EFloat $ fromRational f))
-  Lit (LitDouble f) -> (tmpix, [], (CIR.TDouble, CIR.EFloat $ fromRational f))
+  App _ (Lit (LitDouble f)) -> (tmpix, [], (CIR.TDouble, CIR.EDouble $ fromRational f))
+  Lit (LitDouble f) -> (tmpix, [], (CIR.TDouble, CIR.EDouble $ fromRational f))
   Var v -> case lookup (Direct v) args of
     Just (t', v') -> (tmpix, [], (tout, derefTo tout t' v'))
     -- Assume the Var is a function

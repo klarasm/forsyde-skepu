@@ -143,6 +143,7 @@ data Expression a
   = EVar a
   | EInt Int
   | EFloat Float
+  | EDouble Double
   | EChar Char
   | EString String
   | EBinOp BinaryOperator (Expression a) (Expression a)
@@ -165,6 +166,7 @@ instance Functor Expression where
     EVar i -> EVar $ f i
     EInt l -> EInt l
     EFloat l -> EFloat l
+    EDouble l -> EDouble l
     EChar c -> EChar c
     EString s -> EString s
     EBinOp op e1 e2 -> EBinOp op (f <$> e1) (f <$> e2)
@@ -276,6 +278,7 @@ instance (Pretty a) => Pretty (Expression a) where
     EVar x -> pretty x
     EInt i -> pretty i
     EFloat f -> pretty f
+    EDouble d -> pretty d
     EChar c -> squotes . pretty $ c
     EString s -> dquotes . pretty $ s
     EBinOp op e1 e2 ->
