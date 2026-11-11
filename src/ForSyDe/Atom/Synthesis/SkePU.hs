@@ -759,6 +759,14 @@ instance Synthesizable CContext where
       , CIR.GMacro (ExId $ Name "endif") []
       ]
     stdio = CIR.GMacro (ExId $ Name "include") [ExId $ Name "<stdio.h>"]
+    initV irId sizes =
+      CIR.SExpr $
+        CIR.ECallExpr (CIR.EMemberAccess (CIR.EVar irId) (ExId $ Name "init")) (CIR.EVar <$> sizes)
+    forShort countId maxExp =
+      CIR.SFor
+        (CIR.SVarDef CIR.TSizeT countId Nothing (CIR.EInt 0))
+        (CIR.EBinOp CIR.Less (CIR.EVar countId) maxExp)
+        (CIR.SExpr $ CIR.EUnOp CIR.PostIncrement (CIR.EVar $ countId))
     getInput ret (t, v) = case removePoint t of
       CIR.TConstructor (CIR.TIdent (ExId IVector)) t' ->
         [ CIR.SExpr $
@@ -770,15 +778,9 @@ instance Synthesizable CContext where
                     ]
                       <> getInput statusVar (CIR.TSizeT, ExId Tmp <> Ix 0)
                       <> breakInput (CIR.SReturn Nothing)
-                      <> [ CIR.SExpr $
-                             CIR.ECallExpr (CIR.EMemberAccess (CIR.EVar v) (ExId $ Name "init")) [CIR.EVar $ ExId Tmp <> Ix 0]
-                         ]
-                      <> [ CIR.SFor
-                             (CIR.SVarDef CIR.TSizeT (ExId Tmp <> Ix 1) Nothing (CIR.EInt 0))
-                             (CIR.EBinOp CIR.Less (CIR.EVar $ ExId Tmp <> Ix 1) (CIR.EVar $ ExId Tmp <> Ix 0))
-                             (CIR.SExpr $ CIR.EUnOp CIR.PostIncrement (CIR.EVar $ ExId Tmp <> Ix 1))
-                             $ CIR.SScope
-                             $ (getInput statusVar (t', ExId Input))
+                      <> [ initV v [ExId Tmp <> Ix 0] ]
+                      <> [ forShort (ExId Tmp <> Ix 1) (CIR.EVar $ ExId Tmp <> Ix 0) $ CIR.SScope $
+                             getInput statusVar (t', ExId Input)
                                <> [ CIR.SAssign
                                       (CIR.ECall v [CIR.EVar (ExId Tmp <> Ix 1)])
                                       (CIR.EVar $ ExId Input)
@@ -800,22 +802,10 @@ instance Synthesizable CContext where
                       <> breakInput (CIR.SReturn Nothing)
                       <> getInput statusVar (CIR.TSizeT, ExId Tmp <> Ix 1)
                       <> breakInput (CIR.SReturn Nothing)
-                      <> [ CIR.SExpr $
-                             CIR.ECallExpr
-                               (CIR.EMemberAccess (CIR.EVar v) (ExId $ Name "init"))
-                               [CIR.EVar $ ExId Tmp <> Ix 0, CIR.EVar $ ExId Tmp <> Ix 1]
-                         ]
-                      <> [ CIR.SFor
-                             (CIR.SVarDef CIR.TSizeT (ExId Tmp <> Ix 2) Nothing (CIR.EInt 0))
-                             (CIR.EBinOp CIR.Less (CIR.EVar $ ExId Tmp <> Ix 2) (CIR.EVar $ ExId Tmp <> Ix 0))
-                             (CIR.SExpr $ CIR.EUnOp CIR.PostIncrement (CIR.EVar $ ExId Tmp <> Ix 2))
-                             $ CIR.SScope
-                             [ CIR.SFor
-                                 (CIR.SVarDef CIR.TSizeT (ExId Tmp <> Ix 3) Nothing (CIR.EInt 0))
-                                 (CIR.EBinOp CIR.Less (CIR.EVar $ ExId Tmp <> Ix 3) (CIR.EVar $ ExId Tmp <> Ix 1))
-                                 (CIR.SExpr $ CIR.EUnOp CIR.PostIncrement (CIR.EVar $ ExId Tmp <> Ix 3))
-                                 $ CIR.SScope
-                                 $ (getInput statusVar (t', ExId Input))
+                      <> [ initV v $ (ExId Tmp <>) . Ix <$> [0, 1] ]
+                      <> [ forShort (ExId Tmp <> Ix 2) (CIR.EVar $ ExId Tmp <> Ix 0) $ CIR.SScope
+                             [ forShort (ExId Tmp <> Ix 3) (CIR.EVar $ ExId Tmp <> Ix 1) $ CIR.SScope
+                                 $ getInput statusVar (t', ExId Input)
                                    <> [ CIR.SAssign
                                           (CIR.ECall v [CIR.EVar (ExId Tmp <> Ix 2), CIR.EVar (ExId Tmp <> Ix 3)])
                                           (CIR.EVar $ ExId Input)
