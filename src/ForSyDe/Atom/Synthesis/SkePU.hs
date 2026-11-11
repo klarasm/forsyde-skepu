@@ -767,7 +767,7 @@ instance Synthesizable CContext where
         (CIR.SVarDef CIR.TSizeT countId Nothing (CIR.EInt 0))
         (CIR.EBinOp CIR.Less (CIR.EVar countId) maxExp)
         (CIR.SExpr $ CIR.EUnOp CIR.PostIncrement (CIR.EVar $ countId))
-    getInput ret (t, v) = case removePoint t of
+    getInput failStmt ret (t, v) = case removePoint t of
       CIR.TConstructor (CIR.TIdent (ExId IVector)) t' ->
         [ CIR.SExpr $
             CIR.ECall (ExId $ Name "skepu::external") $
@@ -776,11 +776,10 @@ instance Synthesizable CContext where
                     [ CIR.SVarDecl CIR.TSizeT (ExId Tmp <> Ix 0) Nothing
                     , CIR.SVarDecl t' (ExId Input) Nothing
                     ]
-                      <> getInput statusVar (CIR.TSizeT, ExId Tmp <> Ix 0)
-                      <> breakInput (CIR.SReturn Nothing)
+                      <> getInput (CIR.SReturn Nothing) statusVar (CIR.TSizeT, ExId Tmp <> Ix 0)
                       <> [ initV v [ExId Tmp <> Ix 0] ]
                       <> [ forShort (ExId Tmp <> Ix 1) (CIR.EVar $ ExId Tmp <> Ix 0) $ CIR.SScope $
-                             getInput statusVar (t', ExId Input)
+                             getInput (CIR.SReturn Nothing) statusVar (t', ExId Input)
                                <> [ CIR.SAssign
                                       (CIR.ECall v [CIR.EVar (ExId Tmp <> Ix 1)])
                                       (CIR.EVar $ ExId Input)
@@ -798,14 +797,12 @@ instance Synthesizable CContext where
                     , CIR.SVarDecl CIR.TSizeT (ExId Tmp <> Ix 1) Nothing
                     , CIR.SVarDecl t' (ExId Input) Nothing
                     ]
-                      <> getInput statusVar (CIR.TSizeT, ExId Tmp <> Ix 0)
-                      <> breakInput (CIR.SReturn Nothing)
-                      <> getInput statusVar (CIR.TSizeT, ExId Tmp <> Ix 1)
-                      <> breakInput (CIR.SReturn Nothing)
+                      <> getInput (CIR.SReturn Nothing) statusVar (CIR.TSizeT, ExId Tmp <> Ix 0)
+                      <> getInput (CIR.SReturn Nothing) statusVar (CIR.TSizeT, ExId Tmp <> Ix 1)
                       <> [ initV v $ (ExId Tmp <>) . Ix <$> [0, 1] ]
                       <> [ forShort (ExId Tmp <> Ix 2) (CIR.EVar $ ExId Tmp <> Ix 0) $ CIR.SScope
                              [ forShort (ExId Tmp <> Ix 3) (CIR.EVar $ ExId Tmp <> Ix 1) $ CIR.SScope
-                                 $ getInput statusVar (t', ExId Input)
+                                 $ getInput (CIR.SReturn Nothing) statusVar (t', ExId Input)
                                    <> [ CIR.SAssign
                                           (CIR.ECall v [CIR.EVar (ExId Tmp <> Ix 2), CIR.EVar (ExId Tmp <> Ix 3)])
                                           (CIR.EVar $ ExId Input)
@@ -819,6 +816,7 @@ instance Synthesizable CContext where
         [ CIR.SVarAssign
             ret
             (CIR.ECall (ExId $ Name "scanf") [CIR.EString $ typeToFormat t, CIR.EReference $ CIR.EVar v])
+        , breakInput failStmt
         ]
     putOutput (t, v) = case removePoint t of
       CIR.TConstructor _ _ ->
@@ -846,11 +844,10 @@ instance Synthesizable CContext where
     getArg (_, v) = CIR.EReference $ CIR.EVar v
     statusVar = ExId $ Name "status"
     breakInput stmt =
-      [ CIR.SIf
-          (CIR.EBinOp CIR.Less (CIR.EVar statusVar) (CIR.EInt 1))
-          (CIR.SScope [stmt])
-          Nothing
-      ]
+      CIR.SIf
+        (CIR.EBinOp CIR.Less (CIR.EVar statusVar) (CIR.EInt 1))
+        (CIR.SScope [stmt])
+        Nothing
     main CContext{..} =
       CIR.GFuncDef
         Nothing
@@ -863,8 +860,7 @@ instance Synthesizable CContext where
                  CIR.SScope $
                    map (\(t, v) -> CIR.SVarDecl (removePoint t) v Nothing) (inputs <> outputs)
                      <> [CIR.SVarDef CIR.TInt statusVar Nothing (CIR.EInt 1)]
-                     <> (mconcat . map (getInput statusVar)) inputs
-                     <> breakInput CIR.SBreak
+                     <> (mconcat . map (getInput CIR.SBreak statusVar)) inputs
                      <> [ CIR.SExpr $
                             CIR.ECall (const IEmpty <$> from) $
                               map getArg $
