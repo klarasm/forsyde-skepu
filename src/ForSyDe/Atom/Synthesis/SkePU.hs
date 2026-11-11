@@ -760,7 +760,7 @@ instance Synthesizable CContext where
       ]
     stdio = CIR.GMacro (ExId $ Name "include") [ExId $ Name "<stdio.h>"]
     getInput ret (t, v) = case removePoint t of
-      CIR.TConstructor _ t' ->
+      CIR.TConstructor (CIR.TIdent (ExId IVector)) t' ->
         [ CIR.SExpr $
             CIR.ECall (ExId $ Name "skepu::external") $
               [ CIR.ELambda [ExId $ Name "&"] [] $
@@ -783,6 +783,44 @@ instance Synthesizable CContext where
                                       (CIR.ECall v [CIR.EVar (ExId Tmp <> Ix 1)])
                                       (CIR.EVar $ ExId Input)
                                   ]
+                         ]
+              , CIR.ECall (ExId $ Name "skepu::write") [CIR.EVar v]
+              ]
+        ]
+      CIR.TConstructor (CIR.TIdent (ExId IMatrix)) t' ->
+        [ CIR.SExpr $
+            CIR.ECall (ExId $ Name "skepu::external") $
+              [ CIR.ELambda [ExId $ Name "&"] [] $
+                  CIR.SScope $
+                    [ CIR.SVarDecl CIR.TSizeT (ExId Tmp <> Ix 0) Nothing
+                    , CIR.SVarDecl CIR.TSizeT (ExId Tmp <> Ix 1) Nothing
+                    , CIR.SVarDecl t' (ExId Input) Nothing
+                    ]
+                      <> getInput statusVar (CIR.TSizeT, ExId Tmp <> Ix 0)
+                      <> breakInput (CIR.SReturn Nothing)
+                      <> getInput statusVar (CIR.TSizeT, ExId Tmp <> Ix 1)
+                      <> breakInput (CIR.SReturn Nothing)
+                      <> [ CIR.SExpr $
+                             CIR.ECallExpr
+                               (CIR.EMemberAccess (CIR.EVar v) (ExId $ Name "init"))
+                               [CIR.EVar $ ExId Tmp <> Ix 0, CIR.EVar $ ExId Tmp <> Ix 1]
+                         ]
+                      <> [ CIR.SFor
+                             (CIR.SVarDef CIR.TSizeT (ExId Tmp <> Ix 2) Nothing (CIR.EInt 0))
+                             (CIR.EBinOp CIR.Less (CIR.EVar $ ExId Tmp <> Ix 2) (CIR.EVar $ ExId Tmp <> Ix 0))
+                             (CIR.SExpr $ CIR.EUnOp CIR.PostIncrement (CIR.EVar $ ExId Tmp <> Ix 2))
+                             $ CIR.SScope
+                             [ CIR.SFor
+                                 (CIR.SVarDef CIR.TSizeT (ExId Tmp <> Ix 3) Nothing (CIR.EInt 0))
+                                 (CIR.EBinOp CIR.Less (CIR.EVar $ ExId Tmp <> Ix 3) (CIR.EVar $ ExId Tmp <> Ix 1))
+                                 (CIR.SExpr $ CIR.EUnOp CIR.PostIncrement (CIR.EVar $ ExId Tmp <> Ix 3))
+                                 $ CIR.SScope
+                                 $ (getInput statusVar (t', ExId Input))
+                                   <> [ CIR.SAssign
+                                          (CIR.ECall v [CIR.EVar (ExId Tmp <> Ix 2), CIR.EVar (ExId Tmp <> Ix 3)])
+                                          (CIR.EVar $ ExId Input)
+                                      ]
+                            ]
                          ]
               , CIR.ECall (ExId $ Name "skepu::write") [CIR.EVar v]
               ]
