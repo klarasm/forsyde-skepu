@@ -51,9 +51,9 @@ data Id a
   | Nested (Id a) (Id a)
   | Ix Int
   | ExId a
-  deriving (Data, Typeable)
+  deriving (Eq, Data, Typeable)
 instance (Ord a) => Ord (Id a) where
-  compare Empty Empty = LT
+  compare Empty Empty = EQ
   compare Empty _ = LT
   compare (Ix ix1) (Ix ix2) = compare ix1 ix2
   compare (Ix _) _ = LT
@@ -68,14 +68,6 @@ instance (Ord a) => Ord (Id a) where
   compare _ (Ix _) = GT
   compare _ (Direct _) = GT
   compare _ (Nested _ _) = GT
-instance (Eq a) => Eq (Id a) where
-  (==) Empty _ = False
-  (==) _ Empty = False
-  (==) (Direct i1) (Direct i2) = i1 == i2
-  (==) (Nested i1 b1) (Nested i2 b2) = b1 == b2 && i1 == i2
-  (==) (Ix ix1) (Ix ix2) = ix1 == ix2
-  (==) (ExId n1) (ExId n2) = n1 == n2
-  (==) _ _ = False
 instance (Pretty a) => Pretty (Id a) where
   pretty = \case
     Empty -> mempty
