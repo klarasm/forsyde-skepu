@@ -309,12 +309,27 @@ skelAppToCExpr tmpix1 ret args stmts1 tin tout inports skel e1' =
       (tmpix3, skelInstance) = mkTemp tmpix2
       inputs = zipWith3 derefTo tin (map fst inports) (map (snd . snd) args)
       ini = case (tout, inports, args) of
-        (CIR.TConstructor _ _, (inty, _) : _, (_, (_, expr)) : _) ->
+        (CIR.TConstructor (CIR.TIdent (ExId IVector)) _, (inty, _) : _, (_, (_, expr)) : _) ->
           Just
             [ CIR.ECallExpr
                 ( CIR.EMemberAccess
                     (derefTo CIR.TVoid inty expr)
                     (ExId $ Name "size")
+                )
+                []
+            ]
+        (CIR.TConstructor (CIR.TIdent (ExId IMatrix)) _, (inty, _) : _, (_, (_, expr)) : _) ->
+          Just
+            [ CIR.ECallExpr
+                ( CIR.EMemberAccess
+                    (derefTo CIR.TVoid inty expr)
+                    (ExId $ Name "size_i")
+                )
+                []
+            , CIR.ECallExpr
+                ( CIR.EMemberAccess
+                    (derefTo CIR.TVoid inty expr)
+                    (ExId $ Name "size_j")
                 )
                 []
             ]
