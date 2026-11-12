@@ -118,46 +118,51 @@ showSloppy = \case
   other -> show other
 
 data ProcessConstructor
-  = Comb Int Int [Port] [Port]
+  = Comb Int Int [Port] [Port] CoreExpr
   -- ^ A combNM has a parametrised type for each input and output
-  | Delay Port
+  | Delay Port CoreExpr
   -- ^ A delay has a single parametrised type for both the input and output
   deriving (Data)
 
 instance Pretty ProcessConstructor where
-  pretty (Comb inputs outputs _ _) = pretty "comb" <> pretty inputs <> pretty outputs
-  pretty (Delay _) = pretty "delay"
+  pretty (Comb inputs outputs inports outports expr) =
+    tupled [pretty "comb" <> pretty inputs <> pretty outputs, pretty inports, pretty outports, (pretty . showPprUnsafe) expr]
+  pretty (Delay port ini) =
+    tupled [pretty "delay", pretty port, (pretty . showPprUnsafe) ini]
 
 instance Show ProcessConstructor where
   show = show . pretty
 
 data SkeletonPattern
-  = Farm Int Int [Port] [Port]
+  = Farm Int Int [Port] [Port] CoreExpr
   -- ^ A farmNM has a parametrised type for each input and output
-  | Reduce Port
+  | Reduce Port CoreExpr
   -- ^ A reduce has a single parametrised type for both the input and output
-  | ReduceI Port
+  | ReduceI Port CoreExpr CoreExpr
   -- ^ A reducei has a single parametrised type for both the input and output
   deriving (Data)
 
 instance Pretty SkeletonPattern where
-  pretty (Farm inputs outputs _ _) = pretty "farm" <> pretty inputs <> pretty outputs
-  pretty (Reduce _) = pretty "reduce"
-  pretty (ReduceI _) = pretty "reducei"
+  pretty (Farm inputs outputs inports outports expr) =
+    pretty "farm" <> pretty inputs <> pretty outputs <> tupled [pretty inports, pretty outports, (pretty . showPprUnsafe) expr]
+  pretty (Reduce port expr) =
+    pretty "reduce" <> tupled [pretty port, (pretty . showPprUnsafe) expr]
+  pretty (ReduceI port ini expr) =
+    pretty "reducei" <> tupled [pretty port, (pretty . showPprUnsafe) ini, (pretty . showPprUnsafe) expr]
 
 instance Show SkeletonPattern where
   show = show . pretty
 
 data ProcessType
-  = Placeholder
-  | None
-  | Function
+  = Core CoreExpr
   | MoCProcess ProcessConstructor
   | Skeleton SkeletonPattern
-  deriving (Show, Data)
+  deriving (Data)
 
 instance Pretty ProcessType where
-  pretty = pretty . show
+  pretty (Core e) = pretty "CoreProc" <> nest 2 (pretty . showPprUnsafe $ e)
+  pretty (MoCProcess p) = pretty "MoCProcess" <> nest 2 (pretty p)
+  pretty (Skeleton s) = pretty "Skeleton" <> nest 2 (pretty s)
 
 -- | A system containing mainly processes, vertices and edges.
 data System a = System
@@ -236,6 +241,7 @@ instance Pretty (Process a) where
           , pretty "inports =" <+> pretty inports
           , pretty "outports =" <+> pretty outports
           , pretty "appliedInternal =" <+> (pretty . S.elems) appliedInternal
+          , pretty "procType =" <+> pretty procType
           , maybe (braces . pretty . showPprUnsafe $ body) pretty subsystem
           ]
 
@@ -439,7 +445,7 @@ makeProcess parent procs = \case
             , appliedInternal = case subsystem of
                 Just _ -> mempty
                 Nothing -> S.map Direct . getInternal procs mempty $ body
-            , procType = Placeholder
+            , procType = extractProcessType body
             , mocData = Nothing
             }
       else Nothing
@@ -458,7 +464,7 @@ makeProcess parent procs = \case
         , appliedInternal = case subsystem of
             Just _ -> mempty
             Nothing -> S.map Direct . getInternal procs mempty $ body
-        , procType = Placeholder
+        , procType = extractProcessType body
         , mocData = Nothing
         }
    where
@@ -683,6 +689,53 @@ resolveTuples apps (proc, inputs, output, _) = Just (proc, inputs, outputs)
     (Case _ _ _ ((Alt _ args (Var out)) : _)) ->
       lookup out (zip args (zip [0 ..] $ repeat var))
     _ -> Nothing
+
+startsWith :: Eq a => [a] -> [a] -> Bool
+startsWith a b =
+  let comb = zipWith (==) a b
+  in all id comb && length a == length comb
+
+extractProcessType :: CoreExpr -> ProcessType
+extractProcessType expr = case collectArgs expr of
+  (Var v, args) | startsWith combName (getOccString v) ->
+    let (_, inout) = splitAt (length combName) (getOccString v)
+        (inputs, outputs) = splitAt 1 inout
+    in  multInpOuts (\a b c d e -> MoCProcess $ Comb a b c d e) inputs outputs args
+  (Var v, args) | startsWith farmName (getOccString v) ->
+    let (_, inout) = splitAt (length combName) (getOccString v)
+        (inputs, outputs) = splitAt 1 inout
+    in  multInpOuts (\a b c d e -> Skeleton $ Farm a b c d e) inputs outputs args
+  (Var v, [Type t, appliedExpr]) | getOccString v == delayName ->
+    (MoCProcess $ Delay (makePort t) appliedExpr)
+  (Var v, [Type t, ini, appliedExpr]) | getOccString v == reduceIName ->
+    Skeleton $ ReduceI (makePort t) ini appliedExpr
+  (Var v, [Type t, appliedExpr]) | getOccString v == reduceName ->
+    Skeleton $ Reduce (makePort t) appliedExpr
+  _ -> Core expr
+  where
+    multInpOuts :: (Int -> Int -> [Port] -> [Port] -> CoreExpr -> ProcessType) -> String -> String -> [CoreExpr] -> ProcessType
+    multInpOuts con inputs outputs args =
+      case (reads inputs, reads outputs) of
+      ([(iinputs, "")], [(ioutputs, "")]) ->
+        let inArgs = take iinputs args
+            outArgs = take ioutputs . drop iinputs $ args
+            expr' = drop (iinputs + ioutputs) args
+            out = do
+              inTys <- traverse (\case Type t -> pure t; _ -> fail "Input arg: not a type") inArgs
+              outTys <- traverse (\case Type t -> pure t; _ -> fail "Output arg: not a type") outArgs
+              case expr' of
+                [applied] -> pure $ con iinputs ioutputs
+                  (map makePort inTys) (map makePort outTys) applied
+                _ -> fail "Argument count mismatch"
+        in case out of
+          Just f -> f
+          Nothing -> Core expr
+      _ -> Core expr
+    combName = "comb"
+    delayName = "delay"
+    farmName = "farm"
+    reduceName = "reduce"
+    reduceIName = "reducei"
 
 -- | Make a process from an expression, input binds and output binds
 makeVertex :: Id a -> [Process b] -> Int -> (CoreExpr, [Var], [Var]) -> Maybe (Vertex b)
