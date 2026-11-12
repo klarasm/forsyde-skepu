@@ -226,9 +226,7 @@ data Process a = Process
   , mocData :: Maybe a
   -- ^ Data specific to a MoC, such as rates for SDF
   , procType :: ProcessType
-  -- ^ The process type, either nothing, a function, a process constructor, or skeleton
-  , body :: CoreExpr
-  -- ^ The body of the process
+  -- ^ The process type, either a Core expression, a process, or skeleton
   }
   deriving (Data, Typeable)
 
@@ -247,8 +245,7 @@ instance Pretty (Process a) where
           , pretty "inports =" <+> pretty inports
           , pretty "outports =" <+> pretty outports
           , pretty "appliedInternal =" <+> (pretty . S.elems) appliedInternal
-          , pretty "procType =" <+> pretty procType
-          , maybe (braces . pretty . showPprUnsafe $ body) pretty subsystem
+          , maybe (pretty procType) pretty subsystem
           ]
 
 {- | A process connected in a network.
@@ -446,7 +443,6 @@ makeProcess parent procs = \case
             , inports
             , outports
             , subsystem
-            , body
             , appliedInternal = case subsystem of
                 Just _ -> mempty
                 Nothing -> S.map Direct . getInternal procs mempty $ body
@@ -465,7 +461,6 @@ makeProcess parent procs = \case
         , inports
         , outports
         , subsystem
-        , body
         , appliedInternal = case subsystem of
             Just _ -> mempty
             Nothing -> S.map Direct . getInternal procs mempty $ body
@@ -574,7 +569,10 @@ isDelayVar v =
 
 -- | True if the process is applying a delay Var
 isDelayProcess :: Process a -> Bool
-isDelayProcess Process{body} = isDelayExpr body
+isDelayProcess Process{procType} = case procType of
+  Core body -> isDelayExpr body
+  MoCProcess (Delay _ _) -> True
+  _ -> False
  where
   isDelayExpr = \case
     App (App (Var delay) _) _ -> isDelayVar delay
