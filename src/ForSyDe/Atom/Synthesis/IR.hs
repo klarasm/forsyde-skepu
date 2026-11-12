@@ -117,6 +117,48 @@ showSloppy = \case
   Direct binder -> getOccString binder
   other -> show other
 
+data ProcessConstructor
+  = Comb Int Int [Port] [Port]
+  -- ^ A combNM has a parametrised type for each input and output
+  | Delay Port
+  -- ^ A delay has a single parametrised type for both the input and output
+  deriving (Data)
+
+instance Pretty ProcessConstructor where
+  pretty (Comb inputs outputs _ _) = pretty "comb" <> pretty inputs <> pretty outputs
+  pretty (Delay _) = pretty "delay"
+
+instance Show ProcessConstructor where
+  show = show . pretty
+
+data SkeletonPattern
+  = Farm Int Int [Port] [Port]
+  -- ^ A farmNM has a parametrised type for each input and output
+  | Reduce Port
+  -- ^ A reduce has a single parametrised type for both the input and output
+  | ReduceI Port
+  -- ^ A reducei has a single parametrised type for both the input and output
+  deriving (Data)
+
+instance Pretty SkeletonPattern where
+  pretty (Farm inputs outputs _ _) = pretty "farm" <> pretty inputs <> pretty outputs
+  pretty (Reduce _) = pretty "reduce"
+  pretty (ReduceI _) = pretty "reducei"
+
+instance Show SkeletonPattern where
+  show = show . pretty
+
+data ProcessType
+  = Placeholder
+  | None
+  | Function
+  | MoCProcess ProcessConstructor
+  | Skeleton SkeletonPattern
+  deriving (Show, Data)
+
+instance Pretty ProcessType where
+  pretty = pretty . show
+
 -- | A system containing mainly processes, vertices and edges.
 data System a = System
   { inputs :: [Var]
@@ -170,6 +212,10 @@ data Process a = Process
   -- ^ Internal applications of binders
   , subsystem :: Maybe (System a)
   -- ^ A subsystem if it exists
+  , mocData :: Maybe a
+  -- ^ Data specific to a MoC, such as rates for SDF
+  , procType :: ProcessType
+  -- ^ The process type, either nothing, a function, a process constructor, or skeleton
   , body :: CoreExpr
   -- ^ The body of the process
   }
@@ -393,6 +439,8 @@ makeProcess parent procs = \case
             , appliedInternal = case subsystem of
                 Just _ -> mempty
                 Nothing -> S.map Direct . getInternal procs mempty $ body
+            , procType = Placeholder
+            , mocData = Nothing
             }
       else Nothing
    where
@@ -410,6 +458,8 @@ makeProcess parent procs = \case
         , appliedInternal = case subsystem of
             Just _ -> mempty
             Nothing -> S.map Direct . getInternal procs mempty $ body
+        , procType = Placeholder
+        , mocData = Nothing
         }
    where
     (inports, outports) = makePorts (varType <$> inputs, varType <$> outputs)
