@@ -324,16 +324,15 @@ instance Show Port where
 instance Pretty Port where
   pretty = \case
     Opaque ty ->
-      pretty "OpaquePort"
-        <> (parens . pretty . showPprUnsafe) ty
+        (pretty . showPprUnsafe) ty
     AbstExt inner _ ->
-      pretty "AbstExtPort"
+      pretty "AbstExt"
         <> (parens . pretty) inner
     Signal inner _ _ ->
-      pretty "SignalPort"
+      pretty "Signal"
         <> (parens . pretty) inner
     Vector inner _ ->
-      pretty "VectorPort"
+      pretty "Vector"
         <> (parens . pretty) inner
 
 {- | Translate a Core program into a top-level system. The top-level system
