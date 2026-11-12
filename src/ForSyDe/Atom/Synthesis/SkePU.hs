@@ -648,7 +648,7 @@ removePoint = \case
   CIR.TPointer t -> t
   t -> t
 
-vertexToExpr :: (Foldable t) => t (Id IdExt) -> (Vertex, CContext) -> CExpression
+vertexToExpr :: (Foldable t) => t (Id IdExt) -> (Vertex a, CContext) -> CExpression
 vertexToExpr pointers (Vertex{id = _, ..}, CContext{delayStorage}) = case process of
   Right _ -> undefined
   Left v -> CIR.ECall (const IEmpty <$> v) $ map ioToExpr (map Direct inputs) <> map ioToExpr (map Direct outputs) <> delayParams

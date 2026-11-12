@@ -118,14 +118,14 @@ showSloppy = \case
   other -> show other
 
 -- | A system containing mainly processes, vertices and edges.
-data System = System
+data System a = System
   { inputs :: [Var]
   -- ^ The system input binders
   , outputs :: [Var]
   -- ^ The system output binders
-  , processes :: [Process]
+  , processes :: [Process a]
   -- ^ Processes defined in the system
-  , vertices :: [Vertex]
+  , vertices :: [Vertex a]
   -- ^ Vertices inside the system
   , edges :: [Edge]
   -- ^ Edges between vertices local to the system
@@ -136,9 +136,9 @@ data System = System
   }
   deriving (Data, Typeable)
 
-instance Show System where
+instance Show (System a) where
   show = show . pretty
-instance Pretty System where
+instance Pretty (System a) where
   pretty System{..} =
     nest 4 $
       pretty "System"
@@ -157,7 +157,7 @@ instance Pretty System where
           ]
 
 -- | A process constructor applied to a function, but not connected in a network.
-data Process = Process
+data Process a = Process
   { binder :: Id ()
   {- ^ The constructed Id of the process, either from a
   or constructed from parent system Ids Core binder
@@ -168,20 +168,20 @@ data Process = Process
   -- ^ The output types of the system
   , appliedInternal :: S.Set (Id ())
   -- ^ Internal applications of binders
-  , subsystem :: Maybe System
+  , subsystem :: Maybe (System a)
   -- ^ A subsystem if it exists
   , body :: CoreExpr
   -- ^ The body of the process
   }
   deriving (Data, Typeable)
 
-instance Eq Process where
+instance Eq (Process a) where
   (==) Process{binder = b1} Process{binder = b2} = b1 == b2
-instance Ord Process where
+instance Ord (Process a) where
   compare Process{binder = b1} Process{binder = b2} = compare b1 b2
-instance Show Process where
+instance Show (Process a) where
   show = show . pretty
-instance Pretty Process where
+instance Pretty (Process a) where
   pretty Process{..} =
     nest 4 $
       pretty "Process"
@@ -199,10 +199,10 @@ A vertex can only be referred to inside the same system, since it represents
 an application of a process inside the system. This means the id only needs
 to be unique inside the system.
 -}
-data Vertex = Vertex
+data Vertex a = Vertex
   { id :: Int
   -- ^ The Id of the vertex. It is only unique within its system
-  , process :: Either (Id ()) Process
+  , process :: Either (Id ()) (Process a)
   {- ^ The Id of the applied process or its
   definition if inline
   -}
@@ -215,9 +215,9 @@ data Vertex = Vertex
   }
   deriving (Data, Typeable)
 
-instance Show Vertex where
+instance Show (Vertex a) where
   show = show . pretty
-instance Pretty Vertex where
+instance Pretty (Vertex a) where
   pretty Vertex{id = i, ..} =
     nest 2 $
       pretty "Vertex"
@@ -227,9 +227,9 @@ instance Pretty Vertex where
           , pretty "outputs =" <+> (pretty . showPprUnsafe) outputs
           , either (pretty . show) pretty process
           ]
-instance Eq Vertex where
+instance Eq (Vertex a) where
   (==) Vertex{id = id1} Vertex{id = id2} = id1 == id2
-instance Ord Vertex where
+instance Ord (Vertex a) where
   compare Vertex{id = id1} Vertex{id = id2} = compare id1 id2
 
 -- | An edge (signal) inside a system. Can only refer to local vertices.
@@ -287,7 +287,7 @@ instance Pretty Port where
 {- | Translate a Core program into a top-level system. The top-level system
 itself only contains a list of processes.
 -}
-translate :: CoreProgram -> System
+translate :: CoreProgram -> (System a)
 translate f =
   System
     { inputs = []
@@ -375,7 +375,7 @@ stripLamApps expr = case expr of
 A process should be self-contained, i.e. not have any communication outside
 of its arguments and return.
 -}
-makeProcess :: Id a -> [Process] -> Either (Int, CoreExpr, [Var], [Var]) CoreBind -> Maybe Process
+makeProcess :: Id a -> [Process b] -> Either (Int, CoreExpr, [Var], [Var]) CoreBind -> Maybe (Process b)
 makeProcess parent procs = \case
   Right (Rec _) -> Nothing
   Right (NonRec bind expr') ->
@@ -418,7 +418,7 @@ makeProcess parent procs = \case
 {- | Get all internal function applications of an expression
 This is used to not filter out internal process applications
 -}
-getInternal :: [Process] -> S.Set CoreBndr -> CoreExpr -> S.Set CoreBndr
+getInternal :: [Process a] -> S.Set CoreBndr -> CoreExpr -> S.Set CoreBndr
 getInternal procs acc = \case
   Let (NonRec _ e1) e2 ->
     let acc' = getInternal procs acc e1
@@ -449,7 +449,7 @@ moduleString = moduleNameString . moduleName . nameModule
 {- | Traverse an expression and try to make a system out of it with at least
 one vertex.
 -}
-translateExpr :: Id a -> [Process] -> CoreExpr -> Maybe System
+translateExpr :: Id a -> [Process b] -> CoreExpr -> Maybe (System b)
 translateExpr parent procs expr' = out
  where
   (_, inputs', expr) = collectTyAndValBinders expr'
@@ -493,11 +493,11 @@ translateExpr parent procs expr' = out
       else Nothing
 
 -- | Find processes matching the supplied Id
-procsFromId :: Id a -> [Process] -> [Process]
+procsFromId :: Id a -> [Process b] -> [Process b]
 procsFromId var = filter (\Process{binder} -> binder == (const () <$> var))
 
 -- | True if the integer matches with a delay vertex in the provided list
-isDelayVertex :: [Vertex] -> Int -> Bool
+isDelayVertex :: [Vertex a] -> Int -> Bool
 isDelayVertex vertices vid =
   case filter (\Vertex{id = i, delay} -> i == vid && delay) $ vertices of
     _ : [] -> True
@@ -512,7 +512,7 @@ isDelayVar v =
     && ((moduleString . getName) v == "ForSyDe.Atom.MoC.SY.Lib")
 
 -- | True if the process is applying a delay Var
-isDelayProcess :: Process -> Bool
+isDelayProcess :: Process a -> Bool
 isDelayProcess Process{body} = isDelayExpr body
  where
   isDelayExpr = \case
@@ -529,7 +529,7 @@ isDelayProcess Process{body} = isDelayExpr body
 processes for all non-recursive Let binds, meaning the output has to be
 filtered for signals.
 -}
-getProcesses :: Id a -> [Process] -> CoreExpr -> [Process]
+getProcesses :: Id a -> [Process b] -> CoreExpr -> [Process b]
 getProcesses parent acc = \case
   Lam _ e -> getProcesses parent acc e
   Let bind expr -> case makeProcess parent acc (Right bind) of
@@ -635,7 +635,7 @@ resolveTuples apps (proc, inputs, output, _) = Just (proc, inputs, outputs)
     _ -> Nothing
 
 -- | Make a process from an expression, input binds and output binds
-makeVertex :: Id a -> [Process] -> Int -> (CoreExpr, [Var], [Var]) -> Maybe Vertex
+makeVertex :: Id a -> [Process b] -> Int -> (CoreExpr, [Var], [Var]) -> Maybe (Vertex b)
 makeVertex parent procs ix = \case
   -- An application of a non-inline process
   (Var bind, inputs, outputs) ->
@@ -669,14 +669,14 @@ inside a system definition and should generate an error prior to Core
 generation. Should this happen anyway, it will likely produce a self-edge
 meaning the system won't be schedulable.
 -}
-makeEdge :: [Vertex] -> CoreBndr -> [Edge]
+makeEdge :: [Vertex a] -> CoreBndr -> [Edge]
 makeEdge vertices bind = [Edge bind] <*> source <*> targets
  where
   source = [i | Vertex{id = i, outputs} <- vertices, bind `elem` outputs]
   targets = [i | Vertex{id = i, inputs} <- vertices, bind `elem` inputs]
 
 -- | Gather all processes referenced by the one corresponding to the string
-filterUnused :: String -> System -> Maybe (Process, [Process])
+filterUnused :: String -> (System a) -> Maybe (Process a, [Process a])
 filterUnused procname System{..} =
   case filter (procNamed procname) processes of
     p@Process{..} : _ ->
@@ -692,7 +692,7 @@ filterUnused procname System{..} =
   procNamed name Process{binder} = showSloppy binder == name
 
 -- | Gather all processes referenced and lift them
-filterUnusedSystem :: (S.Set Process, S.Set Process) -> System -> (System, S.Set Process)
+filterUnusedSystem :: (S.Set (Process a), S.Set (Process a)) -> System a -> (System a, S.Set (Process a))
 filterUnusedSystem (reachable, used) s@System{..} =
   (s{processes = [], vertices = vertices'}, subsysUsed)
  where
@@ -706,16 +706,16 @@ filterUnusedSystem (reachable, used) s@System{..} =
     _ -> v
 
 -- | Helper to find processes matchin an Id in a Set, similar to procsFromId
-findProc :: Id a -> S.Set Process -> S.Set Process
+findProc :: Id a -> S.Set (Process b) -> S.Set (Process b)
 findProc var = S.filter (\Process{binder} -> binder == (const () <$> var))
 
 -- | Helper to find processes from internal references
-findInternal :: S.Set Process -> Process -> S.Set Process
+findInternal :: S.Set (Process a) -> (Process a) -> S.Set (Process a)
 findInternal reachable Process{appliedInternal} =
   mconcat $ findProc <$> S.elems appliedInternal <*> [reachable]
 
 -- | Find processes referenced by a vertex or its inline process definition
-vertexProcs :: S.Set Process -> Vertex -> S.Set Process
+vertexProcs :: S.Set (Process a) -> (Vertex a) -> S.Set (Process a)
 vertexProcs reachable Vertex{process} = case process of
   Left p ->
     let procs = findProc p reachable
@@ -726,7 +726,7 @@ vertexProcs reachable Vertex{process} = case process of
      in S.singleton p <> internalApps
 
 -- | Lift all used processes while updating the subsystem to remove locals
-getUsedAndLiftNested :: S.Set Process -> Process -> S.Set Process
+getUsedAndLiftNested :: S.Set (Process a) -> (Process a) -> S.Set (Process a)
 getUsedAndLiftNested reachable p@Process{..} = S.singleton p{subsystem = subsys} <> subsysUsed'
  where
   (subsys, subsysUsed') = case subsystem of
@@ -735,5 +735,5 @@ getUsedAndLiftNested reachable p@Process{..} = S.singleton p{subsystem = subsys}
 
 class Synthesizable a where
   -- may need to resolve a previously unresolved process as dependency
-  synthesize :: [Process] -> Process -> ([a], [a]) -> ([a], [a])
+  synthesize :: [Process a] -> Process a -> ([a], [a]) -> ([a], [a])
   compose :: ([a], [a]) -> a
