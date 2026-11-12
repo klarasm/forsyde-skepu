@@ -501,8 +501,13 @@ makeMap args ports =
 will change how it is processed, meaning this could accept any combNM where
 M in [1,4].
 -}
-makeComb :: [(CType, Id IdExt)] -> [(CType, Id IdExt)] -> [CoreExpr] -> Expr CoreBndr -> (OutputLoc, [((Id IdExt), (CType, CExpression))], CStatement)
-makeComb inports outports tys e =
+makeComb ::
+  Int -> Int ->
+  [(CType, Id IdExt)] -> [(CType, Id IdExt)] ->
+  [Port] -> [Port] ->
+  CoreExpr ->
+  (OutputLoc, [(Id IdExt, (CType, CIR.Expression (Id IdExt)))], CIR.Statement (Id IdExt))
+makeComb _ _ inports outports liports loports e =
   -- TODO: should split the input args and outputs
   let (args, expr) = collectBinders e
       argMap = makeMap args inports
@@ -514,7 +519,7 @@ makeComb inports outports tys e =
                   tout2 = exprToCType te2
                   tout3 = exprToCType te3
                   tout4 = exprToCType te4
-                  tys' = map exprToCType . take (length tys - 4) $ tys
+                  tys' = map portToC liports
                   (cntr, init1, (_, ea1)) = exprToCExpr 0 argMap tys' tout1 inports outports e1
                   (cntr1, init2, (_, ea2)) = exprToCExpr cntr argMap tys' tout2 inports outports e2
                   (cntr2, init3, (_, ea3)) = exprToCExpr cntr1 argMap tys' tout3 inports outports e3
@@ -537,7 +542,7 @@ makeComb inports outports tys e =
               let tout1 = exprToCType te1
                   tout2 = exprToCType te2
                   tout3 = exprToCType te3
-                  tys' = map exprToCType . take (length tys - 3) $ tys
+                  tys' = map portToC liports
                   (cntr, init1, (_, ea1)) = exprToCExpr 0 argMap tys' tout1 inports outports e1
                   (cntr1, init2, (_, ea2)) = exprToCExpr cntr argMap tys' tout2 inports outports e2
                   (_, init3, (_, ea3)) = exprToCExpr cntr1 argMap tys' tout3 inports outports e3
@@ -556,7 +561,7 @@ makeComb inports outports tys e =
           | getOccString v' == "(,)" ->
               let tout1 = exprToCType te1
                   tout2 = exprToCType te2
-                  tys' = map exprToCType . take (length tys - 2) $ tys
+                  tys' = map portToC liports
                   (cntr, init1, (_, ea1)) = exprToCExpr 0 argMap tys' tout1 inports outports e1
                   (_, init2, (_, ea2)) = exprToCExpr cntr argMap tys' tout2 inports outports e2
                in ( FunArg
@@ -569,8 +574,8 @@ makeComb inports outports tys e =
                            ]
                   )
         _ ->
-          let tout1 = exprToCType $ last tys
-              (_, init1, (_, ea1)) = exprToCExpr 0 argMap (map exprToCType $ init tys) tout1 inports outports expr
+          let tout1 = portToC $ last loports
+              (_, init1, (_, ea1)) = exprToCExpr 0 argMap (map portToC liports) tout1 inports outports expr
            in ( FunArg
               , argMap <> outArgs
               , CIR.SScope $
@@ -581,45 +586,11 @@ makeComb inports outports tys e =
 {- | Here all the process constructors are recognised and either passed to a
 helper or processed dierectly
 -}
-bodyToStatement :: [(CType, Id IdExt)] -> [(CType, Id IdExt)] -> CoreExpr -> (OutputLoc, [((Id IdExt), (CType, CExpression))], CStatement)
+bodyToStatement :: [(CType, Id IdExt)] -> [(CType, Id IdExt)] -> ProcessType -> (OutputLoc, [((Id IdExt), (CType, CExpression))], CStatement)
 bodyToStatement inports outports = \case
-  App (App (App (App (App (App (App (App (App (App (App (App (App (Var v) t1) t2) t3) t4) t5) t6) t7) t8) t9) t10) t11) t12) e
-    | getOccString v == "comb84" ->
-        makeComb inports outports [t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11, t12] e
-  App (App (App (App (App (App (App (App (App (App (App (App (Var v) t1) t2) t3) t4) t5) t6) t7) t8) t9) t10) t11) e
-    | getOccString v == "comb74" || getOccString v == "comb83" ->
-        makeComb inports outports [t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11] e
-  App (App (App (App (App (App (App (App (App (App (App (Var v) t1) t2) t3) t4) t5) t6) t7) t8) t9) t10) e
-    | getOccString v == "comb64" || getOccString v == "comb73" || getOccString v == "comb82" ->
-        makeComb inports outports [t1, t2, t3, t4, t5, t6, t7, t8, t9, t10] e
-  App (App (App (App (App (App (App (App (App (App (Var v) t1) t2) t3) t4) t5) t6) t7) t8) t9) e
-    | getOccString v == "comb54" || getOccString v == "comb63" || getOccString v == "comb72" || getOccString v == "comb81" ->
-        makeComb inports outports [t1, t2, t3, t4, t5, t6, t7, t8, t9] e
-  App (App (App (App (App (App (App (App (App (Var v) t1) t2) t3) t4) t5) t6) t7) t8) e
-    | getOccString v == "comb44" || getOccString v == "comb53" || getOccString v == "comb62" || getOccString v == "comb71" ->
-        makeComb inports outports [t1, t2, t3, t4, t5, t6, t7, t8] e
-  App (App (App (App (App (App (App (App (Var v) t1) t2) t3) t4) t5) t6) t7) e
-    | getOccString v == "comb34" || getOccString v == "comb43" || getOccString v == "comb52" || getOccString v == "comb61" ->
-        makeComb inports outports [t1, t2, t3, t4, t5, t6, t7] e
-  App (App (App (App (App (App (App (Var v) t1) t2) t3) t4) t5) t6) e
-    | getOccString v == "comb24" || getOccString v == "comb33" || getOccString v == "comb42" || getOccString v == "comb51" ->
-        makeComb inports outports [t1, t2, t3, t4, t5, t6] e
-  App (App (App (App (App (App (Var v) t1) t2) t3) t4) t5) e
-    | getOccString v == "comb14" || getOccString v == "comb23" || getOccString v == "comb32" || getOccString v == "comb41" ->
-        makeComb inports outports [t1, t2, t3, t4, t5] e
-  App (App (App (App (App (Var v) t1) t2) t3) t4) e
-    | getOccString v == "comb13" || getOccString v == "comb22" || getOccString v == "comb31" ->
-        makeComb inports outports [t1, t2, t3, t4] e
-  App (App (App (App (Var v) t1) t2) t3) e
-    | getOccString v == "comb12" || getOccString v == "comb21" ->
-        makeComb inports outports [t1, t2, t3] e
-  App (App (App (Var v) t1) t2) e
-    | getOccString v == "comb11" -> makeComb inports outports [t1, t2] e
-  -- A delay only has a single parameterised type, and is therefore only
-  -- specialised with one type application
-  App (App (Var v) t) e
-    | typeOrConstraint t && getOccString v == "delay" ->
-        let (_, _, (_, delayExpr)) = exprToCExpr 0 [] [exprToCType t] (exprToCType t) inports outports e
+  MoCProcess (Comb inputs outputs iports oports expr) -> makeComb inputs outputs inports outports iports oports expr
+  MoCProcess (Delay port expr) ->
+        let (_, _, (_, delayExpr)) = exprToCExpr 0 [] [portToC port] (portToC port) inports outports expr
          in ( FunArg
             , map (\(t', i) -> (i, (t', CIR.EVar i))) (inports <> outports)
                 <> zipWith (\i (t', _) -> (i, (t', delayExpr))) [ExId IDelay] outports
@@ -631,8 +602,9 @@ bodyToStatement inports outports = \case
                 , CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId IDelay) (CIR.EDereference . CIR.EVar $ ExId Input <> Ix 0)
                 ]
             )
+  Skeleton _ -> error "Skeletons not supported at toplevel"
   -- Might be a regular function, i.e. not a process
-  e ->
+  Core e ->
     let (args, expr') = collectBinders e
         argMap = makeMap args inports
         (_, stmts, (_, expr)) = exprToCExpr 0 argMap (map fst inports) (fst . head $ outports) inports outports expr'
@@ -677,7 +649,7 @@ instance Synthesizable CContext where
           Nothing ->
             let inputs = zip (map portToC inports) inputIds
                 outputs = zip (map portToC outports) outputIds
-                (retLoc, argMap, body') = bodyToStatement inputs outputs body
+                (retLoc, argMap, body') = bodyToStatement inputs outputs procType
                 delay = length argMap > length inputs + length outputs
                 argToDef (k, (t, _)) = (t, k)
                 context =
