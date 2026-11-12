@@ -505,11 +505,15 @@ makeComb ::
   Int -> Int ->
   [(CType, Id IdExt)] -> [(CType, Id IdExt)] ->
   [Port] -> [Port] ->
-  CoreExpr ->
+  ProcessType ->
   (OutputLoc, [(Id IdExt, (CType, CIR.Expression (Id IdExt)))], CIR.Statement (Id IdExt))
-makeComb _ _ inports outports liports loports e =
+makeComb _ _ inports outports liports loports pt =
   -- TODO: should split the input args and outputs
-  let (args, expr) = collectBinders e
+  let e = case pt of
+        Core ce -> ce
+        MoCProcess ce _ -> ce
+        Skeleton ce _ -> ce
+      (args, expr) = collectBinders e
       argMap = makeMap args inports
       outArgs = makeMap [] outports
    in case expr of
@@ -588,8 +592,8 @@ helper or processed dierectly
 -}
 bodyToStatement :: [(CType, Id IdExt)] -> [(CType, Id IdExt)] -> ProcessType -> (OutputLoc, [((Id IdExt), (CType, CExpression))], CStatement)
 bodyToStatement inports outports = \case
-  MoCProcess (Comb inputs outputs iports oports expr) -> makeComb inputs outputs inports outports iports oports expr
-  MoCProcess (Delay port expr) ->
+  MoCProcess _ (Comb inputs outputs iports oports expr) -> makeComb inputs outputs inports outports iports oports expr
+  MoCProcess _ (Delay port expr) ->
         let (_, _, (_, delayExpr)) = exprToCExpr 0 [] [portToC port] (portToC port) inports outports expr
          in ( FunArg
             , map (\(t', i) -> (i, (t', CIR.EVar i))) (inports <> outports)
@@ -602,9 +606,11 @@ bodyToStatement inports outports = \case
                 , CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId IDelay) (CIR.EDereference . CIR.EVar $ ExId Input <> Ix 0)
                 ]
             )
-  Skeleton _ -> error "Skeletons not supported at toplevel"
+  Skeleton e _ -> func e
   -- Might be a regular function, i.e. not a process
-  Core e ->
+  Core e -> func e
+  where
+   func e =
     let (args, expr') = collectBinders e
         argMap = makeMap args inports
         (_, stmts, (_, expr)) = exprToCExpr 0 argMap (map fst inports) (fst . head $ outports) inports outports expr'
