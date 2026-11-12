@@ -31,12 +31,12 @@ data IdExt
   = Name String
   | Input
   | Output
-  | Delay
+  | IDelay
   | Tmp
   | IVector
   | IMatrix
   | IEmpty
-  | Reduce
+  | IReduce
   | Map
   deriving (Eq, Ord, Show)
 
@@ -44,12 +44,12 @@ instance Pretty IdExt where
   pretty (Name s) = pretty s
   pretty Input = pretty "input"
   pretty Output = pretty "output"
-  pretty Delay = pretty "delay"
+  pretty IDelay = pretty "delay"
   pretty Tmp = pretty "tmp"
   pretty IVector = pretty "skepu::Vector"
   pretty IMatrix = pretty "skepu::Matrix"
   pretty IEmpty = mempty
-  pretty Reduce = pretty "skepu::Reduce"
+  pretty IReduce = pretty "skepu::Reduce"
   pretty Map = pretty "skepu::Map"
 
 type CType = CIR.Type (Id IdExt)
@@ -176,7 +176,7 @@ data OutputLoc
 -- Get the corresponding SkePU skeleton from the function name
 skelToSkePU :: String -> Maybe (OutputLoc, Id IdExt)
 skelToSkePU = \case
-  "reducei" -> Just (Return, ExId Reduce)
+  "reducei" -> Just (Return, ExId IReduce)
   "farm11" -> Just (FunArg, ExId Map <> (ExId $ Name "<1>"))
   "farm12" -> Just (FunArg, ExId Map <> (ExId $ Name "<1>"))
   "farm13" -> Just (FunArg, ExId Map <> (ExId $ Name "<1>"))
@@ -622,13 +622,13 @@ bodyToStatement inports outports = \case
         let (_, _, (_, delayExpr)) = exprToCExpr 0 [] [exprToCType t] (exprToCType t) inports outports e
          in ( FunArg
             , map (\(t', i) -> (i, (t', CIR.EVar i))) (inports <> outports)
-                <> zipWith (\i (t', _) -> (i, (t', delayExpr))) [ExId Delay] outports
+                <> zipWith (\i (t', _) -> (i, (t', delayExpr))) [ExId IDelay] outports
             , -- The delay can both be used on intermediary signals and input/output
               -- signals. When used on an output signal, it needs to also output the
               -- current value of the delay, hence the shuffling of values.
               CIR.SScope
-                [ CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 0) (CIR.EDereference . CIR.EVar $ ExId Delay)
-                , CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Delay) (CIR.EDereference . CIR.EVar $ ExId Input <> Ix 0)
+                [ CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 0) (CIR.EDereference . CIR.EVar $ ExId IDelay)
+                , CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId IDelay) (CIR.EDereference . CIR.EVar $ ExId Input <> Ix 0)
                 ]
             )
   -- Might be a regular function, i.e. not a process
@@ -657,7 +657,7 @@ vertexToExpr pointers (Vertex{id = _, ..}, CContext{delayStorage}) = case proces
     S.elems
       . S.map
         ( \(_, s, _) -> case s of
-            ExId Delay -> CIR.EVar . (<> ExId Delay) . Direct . head $ outputs
+            ExId IDelay -> CIR.EVar . (<> ExId IDelay) . Direct . head $ outputs
             _ -> CIR.EVar s
         )
       $ delayStorage
@@ -737,7 +737,7 @@ instance Synthesizable CContext where
                 findVert vid = find (\(Vertex{id = i}, _) -> i == vid) <$> vContext >>= id
                 -- Collect the vertices in scheduled order
                 schedVert = sequenceA <$> map findVert <$> schedule >>= id
-                delaySigs' = map (\b -> Direct b <> ExId Delay) delaySigs
+                delaySigs' = map (\b -> Direct b <> ExId IDelay) delaySigs
                 pointers = delaySigs' <> map Direct inputs <> map Direct outputs
                 -- Get the calls to the scheduled processes, passing which
                 -- Ids should be dereferenced or not.
@@ -747,7 +747,7 @@ instance Synthesizable CContext where
                 localDefs = map ((\(t, s) -> CIR.SVarDecl t s Nothing) . (\(t, n) -> (removePoint t, n)) . varToCDef) . S.elems $ locals
                 -- Get definitions of delays and initialise them to their
                 -- previous value.
-                delayTmps = map (\(t, i) -> CIR.SVarDef (removePoint t) i Nothing (CIR.EDereference . CIR.EVar $ i <> ExId Delay)) delayTypes
+                delayTmps = map (\(t, i) -> CIR.SVarDef (removePoint t) i Nothing (CIR.EDereference . CIR.EVar $ i <> ExId IDelay)) delayTypes
                 context =
                   CContext
                     { from = binder
