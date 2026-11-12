@@ -623,7 +623,7 @@ removePoint = \case
 vertexToExpr :: (Foldable t) => t (Id IdExt) -> (Vertex a, CContext) -> CExpression
 vertexToExpr pointers (Vertex{id = _, ..}, CContext{delayStorage}) = case process of
   Right _ -> undefined
-  Left v -> CIR.ECall (const IEmpty <$> v) $ map ioToExpr (map Direct inputs) <> map ioToExpr (map Direct outputs) <> delayParams
+  Left v -> CIR.ECall (IEmpty <$ v) $ map ioToExpr (map Direct inputs) <> map ioToExpr (map Direct outputs) <> delayParams
  where
   delayParams =
     S.elems
@@ -851,7 +851,7 @@ instance Synthesizable CContext where
                      <> [CIR.SVarDef CIR.TInt statusVar Nothing (CIR.EInt 1)]
                      <> (mconcat . map (getInput CIR.SBreak statusVar)) inputs
                      <> [ CIR.SExpr $
-                            CIR.ECall (const IEmpty <$> from) $
+                            CIR.ECall (IEmpty <$ from) $
                               map getArg $
                                 inputs <> outputs <> (S.elems $ S.map (\(t, v, _) -> (t, v)) $ delayStorage)
                         ]
@@ -859,12 +859,12 @@ instance Synthesizable CContext where
              ]
           <> [CIR.SReturn $ Just $ CIR.EInt $ -1]
     contextToGlobal CContext{..} =
-      ( CIR.GFuncDeclare (Just CIR.Static) ret (const IEmpty <$> from) $
+      ( CIR.GFuncDeclare (Just CIR.Static) ret (IEmpty <$ from) $
           inputs <> outputs <> (S.elems . S.map (\(t, n, _) -> (t, n))) delayStorage
       , CIR.GFuncDef
           (Just CIR.Static)
           ret
-          (const IEmpty <$> from)
+          (IEmpty <$ from)
           (inputs <> outputs <> (S.elems . S.map (\(t, n, _) -> (t, n))) delayStorage)
           body
       )

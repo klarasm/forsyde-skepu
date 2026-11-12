@@ -461,7 +461,7 @@ makeProcess parent procs = \case
   Left (ix, body, inputs, outputs) ->
     Just
       Process
-        { binder = const () <$> parent <> Ix ix
+        { binder = () <$ parent <> Ix ix
         , inports
         , outports
         , subsystem
@@ -555,7 +555,7 @@ translateExpr parent procs expr' = out
 
 -- | Find processes matching the supplied Id
 procsFromId :: Id a -> [Process b] -> [Process b]
-procsFromId var = filter (\Process{binder} -> binder == (const () <$> var))
+procsFromId var = filter (\Process{binder} -> binder == (() <$ var))
 
 -- | True if the integer matches with a delay vertex in the provided list
 isDelayVertex :: [Vertex a] -> Int -> Bool
@@ -815,7 +815,7 @@ filterUnusedSystem (reachable, used) s@System{..} =
 
 -- | Helper to find processes matchin an Id in a Set, similar to procsFromId
 findProc :: Id a -> S.Set (Process b) -> S.Set (Process b)
-findProc var = S.filter (\Process{binder} -> binder == (const () <$> var))
+findProc var = S.filter (\Process{binder} -> binder == (() <$ var))
 
 -- | Helper to find processes from internal references
 findInternal :: S.Set (Process a) -> (Process a) -> S.Set (Process a)
