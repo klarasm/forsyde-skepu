@@ -229,7 +229,24 @@ resolveOp tmpix stmts [(t1, expr1), (t2, expr2)] tout = \case
   "-" -> (tmpix, stmts, (tout, CIR.EBinOp CIR.Subtract e1 e2))
   "quot" -> (tmpix, stmts, (tout, CIR.EBinOp CIR.Divide e1 e2))
   "/" -> (tmpix, stmts, (tout, CIR.EBinOp CIR.Divide e1 e2))
-  "div" -> error "Haskell `div` rounds to negative infinity, not implemented. Consider using `quot`"
+  -- see https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2025/p3724r0.html
+  "div" ->
+    let v1 = derefTo CIR.TVoid t1 expr1
+        v2 = derefTo CIR.TVoid t2 expr2
+     in ( tmpix
+        , stmts
+        ,
+          ( tout
+          , CIR.EBinOp
+              CIR.Subtract
+              (CIR.EBinOp CIR.Divide v1 v2)
+              ( CIR.EBinOp
+                  CIR.LogicalAnd
+                  (CIR.EBinOp CIR.Less (CIR.EBinOp CIR.BitwiseXor v1 v2) (CIR.EInt 0))
+                  (CIR.EBinOp CIR.NotEqual (CIR.EBinOp CIR.Modulo v1 v2) (CIR.EInt 0))
+              )
+          )
+        )
   "const" -> (tmpix, stmts, (tout, e1))
   "max" -> (tmpix, stmts, (tout, CIR.ETernary (CIR.EBinOp CIR.Greater e1 e2) e1 e2))
   "min" -> (tmpix, stmts, (tout, CIR.ETernary (CIR.EBinOp CIR.Less e1 e2) e1 e2))
