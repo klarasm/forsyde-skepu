@@ -82,6 +82,10 @@ data BinaryOperator
   | LessEqual
   | Greater
   | GreaterEqual
+  | BitwiseAnd
+  | BitwiseXor
+  | BitwiseOr
+  | BitwiseNot
   deriving (Data, Typeable, Eq, Ord)
 instance Pretty BinaryOperator where
   pretty = \case
@@ -103,6 +107,11 @@ instance Pretty BinaryOperator where
     LessEqual -> pretty "<="
     Greater -> pretty ">"
     GreaterEqual -> pretty ">="
+    BitwiseAnd -> pretty "&"
+    BitwiseXor -> pretty "^"
+    BitwiseOr -> pretty "|"
+    BitwiseNot -> pretty "~"
+
 instance Show BinaryOperator where
   show = show . pretty
 
