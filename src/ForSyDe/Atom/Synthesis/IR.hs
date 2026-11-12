@@ -163,9 +163,12 @@ data ProcessType
   deriving (Data)
 
 instance Pretty ProcessType where
-  pretty (Core e) = pretty "CoreProc" <> nest 2 (pretty . showPprUnsafe $ e)
-  pretty (MoCProcess p) = pretty "MoCProcess" <> nest 2 (pretty p)
-  pretty (Skeleton s) = pretty "Skeleton" <> nest 2 (pretty s)
+  pretty (Core e) = pretty "Core" <+> nest 2 (pretty . showPprUnsafe $ e)
+  pretty (MoCProcess p) = pretty "MoCProcess" <+> nest 2 (pretty p)
+  pretty (Skeleton s) = pretty "Skeleton" <+> nest 2 (pretty s)
+
+instance Show ProcessType where
+  show = show . pretty
 
 -- | A system containing mainly processes, vertices and edges.
 data System a = System
