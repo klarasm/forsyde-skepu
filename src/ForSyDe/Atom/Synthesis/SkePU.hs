@@ -489,13 +489,9 @@ derefTo :: CIR.Type a1 -> CIR.Type a2 -> CIR.Expression a -> CIR.Expression a
 derefTo outty inty = derefArg (needDeref (0 :: Int) (inty, outty))
 
 -- | Make an argument map, from args if existent otherwise from ports
-makeMap :: (Ord a, Eq a2) => [CoreBndr] -> [(a2, Id a)] -> [((Id a), (a2, CIR.Expression (Id a)))]
-makeMap args ports =
-  case zipWith (\b (t, _) -> (Direct b, (t, CIR.EVar (Direct b)))) args ports of
-    m
-      | m == mempty ->
-          map (\(t, n) -> (n, (t, CIR.EVar n))) ports
-      | otherwise -> m
+makeMap :: [CoreBndr] -> [(a2, Id a)] -> [((Id a), (a2, CIR.Expression (Id a)))]
+makeMap [] ports = map (\(ty, ident) -> (ident, (ty, CIR.EVar ident))) ports
+makeMap args ports = zipWith (\b (t, _) -> (Direct b, (t, CIR.EVar (Direct b)))) args ports
 
 {- | Create processes using combNM. Note that only the number of tupled outputs
 will change how it is processed, meaning this could accept any combNM where
@@ -531,11 +527,7 @@ makeComb _ _ inports outports liports loports pt =
                         <> init2
                         <> init3
                         <> init4
-                        <> [ CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 0) ea1
-                           , CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 1) ea2
-                           , CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 2) ea3
-                           , CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 3) ea4
-                           ]
+                        <> zipWith (\(ty, ident) e -> CIR.SAssign (derefTo CIR.TVoid ty $ CIR.EVar ident) e) outports [ea1, ea2, ea3, ea4]
                   )
         App (App (App (App (App (App (Var v') te1) te2) te3) e1) e2) e3
           | getOccString v' == "(,,)" ->
@@ -552,10 +544,7 @@ makeComb _ _ inports outports liports loports pt =
                       init1
                         <> init2
                         <> init3
-                        <> [ CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 0) ea1
-                           , CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 1) ea2
-                           , CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 2) ea3
-                           ]
+                        <> zipWith (\(ty, ident) e -> CIR.SAssign (derefTo CIR.TVoid ty $ CIR.EVar ident) e) outports [ea1, ea2, ea3]
                   )
         App (App (App (App (Var v') te1) te2) e1) e2
           | getOccString v' == "(,)" ->
@@ -569,9 +558,7 @@ makeComb _ _ inports outports liports loports pt =
                   , CIR.SScope $
                       init1
                         <> init2
-                        <> [ CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 0) ea1
-                           , CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 1) ea2
-                           ]
+                        <> zipWith (\(ty, ident) e -> CIR.SAssign (derefTo CIR.TVoid ty $ CIR.EVar ident) e) outports [ea1, ea2]
                   )
         _ ->
           let tout1 = portToC $ last loports
@@ -580,7 +567,7 @@ makeComb _ _ inports outports liports loports pt =
               , argMap <> outArgs
               , CIR.SScope $
                   init1
-                    <> [CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId Output <> Ix 0) ea1]
+                    <> zipWith (\(ty, ident) e -> CIR.SAssign (derefTo CIR.TVoid ty $ CIR.EVar ident) e) outports [ea1]
               )
 
 {- | Here all the process constructors are recognised and either passed to a
