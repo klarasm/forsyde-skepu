@@ -29,6 +29,7 @@ module ForSyDe.Atom.Synthesis.IR (
   procsFromId,
   vertexProcs,
   extractTypes,
+  coreFromProcType,
 )
 where
 
@@ -173,15 +174,25 @@ data ProcessType
   = Core CoreExpr
   | MoCProcess CoreExpr ProcessConstructor
   | Skeleton CoreExpr SkeletonPattern
+  | Pipe CoreExpr Port Port Port ProcessType ProcessType
   deriving (Data)
 
 instance Pretty ProcessType where
   pretty (Core e) = pretty "Core" <+> nest 2 (pretty . showPprUnsafe $ e)
   pretty (MoCProcess _ p) = pretty "MoCProcess" <+> nest 2 (pretty p)
   pretty (Skeleton _ s) = pretty "Skeleton" <+> nest 2 (pretty s)
+  pretty (Pipe _ tin tmid tout left right) =
+    pretty "Pipe" <+> nest 2 (tupled [pretty tin, pretty tmid, pretty tout, pretty left, pretty right])
 
 instance Show ProcessType where
   show = show . pretty
+
+coreFromProcType :: ProcessType -> CoreExpr
+coreFromProcType = \case
+  Core e -> e
+  MoCProcess e _ -> e
+  Skeleton e _ -> e
+  Pipe e _ _ _ _ _ -> e
 
 -- | A system containing mainly processes, vertices and edges.
 data System a = System
@@ -731,6 +742,8 @@ extractProcessType expr = case collectArgs expr of
     Skeleton expr $ ReduceI (makePort t) (extractProcessType ini) (extractProcessType appliedExpr)
   (Var v, [Type t, appliedExpr]) | getOccString v == reduceName ->
     Skeleton expr $ Reduce (makePort t) (extractProcessType appliedExpr)
+  (Var v, [Type tmid, Type tout, Type tin, fleft, fright]) | getOccString v == "." ->
+    Pipe expr (makePort tin) (makePort tmid) (makePort tout) (extractProcessType fleft) (extractProcessType fright)
   _ -> Core expr
   where
     getType :: MonadFail m => Expr a -> m Type

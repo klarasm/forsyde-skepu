@@ -509,11 +509,7 @@ makeComb ::
   (OutputLoc, [(Id IdExt, (CType, CIR.Expression (Id IdExt)))], CIR.Statement (Id IdExt))
 makeComb _ _ inports outports liports loports pt =
   -- TODO: should split the input args and outputs
-  let e = case pt of
-        Core ce -> ce
-        MoCProcess ce _ -> ce
-        Skeleton ce _ -> ce
-      (args, expr) = collectBinders e
+  let (args, expr) = collectBinders . coreFromProcType $ pt
       argMap = makeMap args inports
       outArgs = makeMap [] outports
    in case expr of
@@ -606,7 +602,8 @@ bodyToStatement inports outports = \case
                 , CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId IDelay) (CIR.EDereference . CIR.EVar $ ExId Input <> Ix 0)
                 ]
             )
-  MoCProcess _ p -> error $ "Unsupported process constructor: " <> show p
+  p@(MoCProcess _ _) -> error $ "Unsupported: " <> show p
+  p@(Pipe _ _ _ _ _ _) -> error $ "Unsupported: " <> show p
   Skeleton e _ -> func e
   -- Might be a regular function, i.e. not a process
   Core e -> func e
