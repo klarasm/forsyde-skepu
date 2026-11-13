@@ -614,13 +614,13 @@ removePoint = \case
 vertexToExpr :: (Foldable t) => t (Id IdExt) -> (Vertex a, CContext) -> CExpression
 vertexToExpr pointers (Vertex{id = _, ..}, CContext{delayStorage}) = case process of
   Right _ -> undefined
-  Left v -> CIR.ECall (IEmpty <$ v) $ map ioToExpr (map Direct inputs) <> map ioToExpr (map Direct outputs) <> delayParams
+  Left v -> CIR.ECall (IEmpty <$ v) $ map ioToExpr (map (IEmpty <$) inputs) <> map ioToExpr (map (IEmpty <$) outputs) <> delayParams
  where
   delayParams =
     S.elems
       . S.map
         ( \(_, s, _) -> case s of
-            ExId IDelay -> CIR.EVar . (<> ExId IDelay) . Direct . head $ outputs
+            ExId IDelay -> CIR.EVar . (<> ExId IDelay) . (IEmpty <$) . head $ outputs
             _ -> CIR.EVar s
         )
       $ delayStorage
@@ -682,35 +682,45 @@ instance Synthesizable CContext where
                 vContext = sequenceA $ map vertexContext vertices
                 delays = filter (\(Vertex{delay}, _) -> delay) <$> vContext
                 -- Get the vars of all delay signals.
-                delaySigs =
-                  mconcat
-                    . mapMaybe
-                      ( \Vertex{delay, outputs = outputs'} ->
-                          if delay && length outputs' == 1
-                            then Just outputs'
+                delaySigs = S.fromList $
+                    mapMaybe
+                      ( \Edge{binder = b, ..} ->
+                          if delayEdge
+                            then Just (portToC port, IEmpty <$ b)
                             else Nothing
                       )
-                    $ vertices
-                delayTypes = map varToCDef delaySigs
+                    $ edges
                 -- Get the definition of delay parameters and their initial value.
-                delayDefs = mconcat . map (\(Vertex{outputs = outs}, CContext{delayStorage}) -> zipWith delayDef outs $ S.elems delayStorage) <$> delays
-                delayDef var (t, i, e) = (t, Direct var <> i, e)
+                delayDefs =
+                  mconcat
+                    . map
+                      ( \(Vertex{outputs = outs}, CContext{delayStorage}) ->
+                          zipWith delayDef outs $
+                            S.elems delayStorage
+                      )
+                    <$> delays
+                delayDef var (t, i, e) = (t, (IEmpty <$ var) <> i, e)
                 -- Get all delays passed from subsystems.
-                subsysStorage = mconcat . mapMaybe (\CContext{delayStorage, delay} -> if delay then Nothing else Just delayStorage) $ subsysNew
+                subsysStorage =
+                  mconcat
+                    . mapMaybe (\CContext{delayStorage, delay} -> if delay then Nothing else Just delayStorage)
+                    $ subsysNew
                 findVert vid = find (\(Vertex{id = i}, _) -> i == vid) <$> vContext >>= id
                 -- Collect the vertices in scheduled order
                 schedVert = sequenceA <$> map findVert <$> schedule >>= id
-                delaySigs' = map (\b -> Direct b <> ExId IDelay) delaySigs
-                pointers = delaySigs' <> map Direct inputs <> map Direct outputs
+                delaySigs' = S.map (\(t, b) -> (t, (IEmpty <$ b) <> ExId IDelay)) delaySigs
+                pointers = delaySigs' <> (S.map (\v -> ((portToC . makePort . varType) v, Direct v)) $ S.fromList (inputs <> outputs))
                 -- Get the calls to the scheduled processes, passing which
                 -- Ids should be dereferenced or not.
-                schedStmts = map (CIR.SExpr . vertexToExpr pointers) <$> schedVert
-                locals = S.filter (\v -> not (elem (Direct v) (pointers <> map Direct delaySigs))) . S.fromList . map (\(Edge v _ _) -> v) $ edges
+                schedStmts = map (CIR.SExpr . vertexToExpr (S.map snd pointers)) <$> schedVert
+                locals = S.difference
+                    (S.fromList $ mapMaybe ( \(Edge ident port delay _ _) -> if delay then Nothing else Just (portToC port, IEmpty <$ ident)) edges)
+                    (pointers)
                 -- Get declarations of intermediare signals.
-                localDefs = map ((\(t, s) -> CIR.SVarDecl t s Nothing) . (\(t, n) -> (removePoint t, n)) . varToCDef) . S.elems $ locals
+                localDefs = S.map ((\(t, s) -> CIR.SVarDecl t s Nothing) . (\(t, n) -> (removePoint t, n))) locals
                 -- Get definitions of delays and initialise them to their
                 -- previous value.
-                delayTmps = map (\(t, i) -> CIR.SVarDef (removePoint t) i Nothing (CIR.EDereference . CIR.EVar $ i <> ExId IDelay)) delayTypes
+                delayTmps = S.map (\(t, i) -> CIR.SVarDef (removePoint t) i Nothing (CIR.EDereference . CIR.EVar $ i <> ExId IDelay)) delaySigs
                 context =
                   CContext
                     { from = binder
@@ -722,7 +732,7 @@ instance Synthesizable CContext where
                         Just d -> S.fromList d <> subsysStorage
                         Nothing -> error "delay mismatch"
                     , body = CIR.SScope $ case schedStmts of
-                        Just s -> localDefs <> delayTmps <> s
+                        Just s -> S.elems localDefs <> S.elems delayTmps <> s
                         Nothing -> error "invalid schedule"
                     , program = Nothing
                     }

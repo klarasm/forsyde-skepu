@@ -285,9 +285,9 @@ data Vertex a = Vertex
   {- ^ The Id of the applied process or its
   definition if inline
   -}
-  , inputs :: [Var]
+  , inputs :: [Id ()]
   -- ^ Input signals
-  , outputs :: [Var]
+  , outputs :: [Id ()]
   -- ^ Output signals
   , delay :: Bool
   -- ^ If the vertex delays its output
@@ -302,8 +302,8 @@ instance Pretty (Vertex a) where
       pretty "Vertex"
         <> tupled
           [ pretty i
-          , pretty "inputs =" <+> (pretty . showPprUnsafe) inputs
-          , pretty "outputs =" <+> (pretty . showPprUnsafe) outputs
+          , pretty "inputs =" <+> pretty inputs
+          , pretty "outputs =" <+> pretty outputs
           , either (pretty . show) pretty process
           ]
 instance Eq (Vertex a) where
@@ -313,8 +313,12 @@ instance Ord (Vertex a) where
 
 -- | An edge (signal) inside a system. Can only refer to local vertices.
 data Edge = Edge
-  { binder :: Var
+  { binder :: Id ()
   -- ^ The Core binder of the signal
+  , port :: Port
+  -- ^ The type
+  , delayEdge :: Bool
+  -- ^ If the edge is delayed
   , source :: Int
   -- ^ The source vertex
   , target :: Int
@@ -329,7 +333,7 @@ instance Pretty Edge where
     nest 2 $
       pretty "Edge"
         <> tupled
-          [ (pretty . showPprUnsafe) binder
+          [ pretty binder
           , pretty source
           , pretty target
           ]
@@ -453,7 +457,7 @@ stripLamApps expr = case expr of
 A process should be self-contained, i.e. not have any communication outside
 of its arguments and return.
 -}
-makeProcess :: Id a -> [Process b] -> Either (Int, CoreExpr, [Var], [Var]) CoreBind -> Maybe (Process b)
+makeProcess :: Id a -> [Process b] -> Either (Int, CoreExpr, [(Id (), Type)], [(Id (), Type)]) CoreBind -> Maybe (Process b)
 makeProcess parent procs = \case
   Right (Rec _) -> Nothing
   Right (NonRec bind expr') ->
@@ -492,7 +496,7 @@ makeProcess parent procs = \case
         , mocData = Nothing
         }
    where
-    (inports, outports) = makePorts (varType <$> inputs, varType <$> outputs)
+    (inports, outports) = makePorts (snd <$> inputs, snd <$> outputs)
     subsystem = translateExpr (parent <> Ix ix) procs body
 
 {- | Get all internal function applications of an expression
@@ -537,13 +541,16 @@ translateExpr parent procs expr' = out
   (binds, inputMap, sigs, outputs) = getSignals inputs [] [] expr
   apps' = map (getApplication binds) sigs
   apps = mapMaybe (resolveTuples apps') apps'
+  varToIdType v = (Direct v, varType v)
+  appToIdTypes (e, inv, outv) = (e, map varToIdType inv, map varToIdType outv)
+  _ = map (\() -> ()) []
   processes =
     filter (\Process{binder} -> not $ elem binder (Direct <$> binds)) $
       getProcesses parent [] expr
   vertices =
-    catMaybes . zipWith (makeVertex parent (procs <> processes)) [0 ..] $
+    catMaybes . zipWith (makeVertex parent (procs <> processes)) [0 ..] . map appToIdTypes $
       apps <> map (\(v, m) -> (Var v, [v], m)) inputMap
-  edges = mconcat . map (makeEdge vertices) $ binds
+  edges = mconcat . map (makeEdge vertices . \v -> (Direct v, makePort . varType $ v)) $ binds
   dependencies =
     mapMaybe
       ( \Edge{source, target} ->
@@ -795,7 +802,7 @@ extractProcessType expr = case collectArgs expr of
     reduceIName = "reducei"
 
 -- | Make a process from an expression, input binds and output binds
-makeVertex :: Id a -> [Process b] -> Int -> (CoreExpr, [Var], [Var]) -> Maybe (Vertex b)
+makeVertex :: Id a -> [Process b] -> Int -> (CoreExpr, [(Id (), Type)], [(Id (), Type)]) -> Maybe (Vertex b)
 makeVertex parent procs ix = \case
   -- An application of a non-inline process
   (Var bind, inputs, outputs) ->
@@ -803,8 +810,8 @@ makeVertex parent procs ix = \case
       Vertex
         { id = ix
         , process = Left (Direct bind)
-        , inputs
-        , outputs
+        , inputs = fst <$> inputs
+        , outputs = fst <$> outputs
         , delay = case filter isDelayProcess . procsFromId (Direct bind) $ procs of
             [] -> False
             _ -> True
@@ -817,8 +824,8 @@ makeVertex parent procs ix = \case
       Vertex
         { id = ix
         , process
-        , inputs
-        , outputs
+        , inputs = fst <$> inputs
+        , outputs = fst <$> outputs
         , delay = isDelayProcess proc
         }
 
@@ -829,10 +836,10 @@ inside a system definition and should generate an error prior to Core
 generation. Should this happen anyway, it will likely produce a self-edge
 meaning the system won't be schedulable.
 -}
-makeEdge :: [Vertex a] -> CoreBndr -> [Edge]
-makeEdge vertices bind = [Edge bind] <*> source <*> targets
+makeEdge :: [Vertex a] -> (Id (), Port) -> [Edge]
+makeEdge vertices (bind, port) = Edge bind port (and delays) <$> source <*> targets
  where
-  source = [i | Vertex{id = i, outputs} <- vertices, bind `elem` outputs]
+  (source, delays) = unzip $ [(i, delay) | Vertex{id = i, delay, outputs} <- vertices, bind `elem` outputs]
   targets = [i | Vertex{id = i, inputs} <- vertices, bind `elem` inputs]
 
 -- | Gather all processes referenced by the one corresponding to the string
