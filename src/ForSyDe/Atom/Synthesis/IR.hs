@@ -35,7 +35,7 @@ where
 
 import Data.Data (Data, Typeable)
 import Data.List (sort)
-import Data.Maybe (mapMaybe)
+import Data.Maybe (catMaybes, mapMaybe)
 import qualified Data.Set as S
 import GHC.Core
 import GHC.Core.DataCon
@@ -541,7 +541,7 @@ translateExpr parent procs expr' = out
     filter (\Process{binder} -> not $ elem binder (Direct <$> binds)) $
       getProcesses parent [] expr
   vertices =
-    mapMaybe id . zipWith (makeVertex parent (procs <> processes)) [0 ..] $
+    catMaybes . zipWith (makeVertex parent (procs <> processes)) [0 ..] $
       apps <> map (\(v, m) -> (Var v, [v], m)) inputMap
   edges = mconcat . map (makeEdge vertices) $ binds
   dependencies =
