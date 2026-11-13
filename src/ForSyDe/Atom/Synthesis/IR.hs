@@ -6,6 +6,8 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE NoFieldSelectors #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# OPTIONS_GHC -Wno-orphans #-}
 
 module ForSyDe.Atom.Synthesis.IR (
   System (..),
@@ -47,6 +49,9 @@ import GHC.Utils.Outputable (showPprUnsafe)
 
 import qualified Data.Graph as G
 import Prettyprinter
+
+instance MonadFail (Either String) where
+  fail = Left
 
 data Id a
   = Empty
@@ -123,15 +128,23 @@ showSloppy = \case
 data ProcessConstructor
   = Comb Int Int [Port] [Port] ProcessType
   -- ^ A combNM has a parametrised type for each input and output
-  | Delay Port CoreExpr
+  | Delay Port ProcessType
   -- ^ A delay has a single parametrised type for both the input and output
+  | Moore Int Int Port [Port] [Port] ProcessType ProcessType ProcessType
+  -- ^ A mooreNM has a parametrised type for the state, inputs and outputs
+  | Mealy Int Int Port [Port] [Port] ProcessType ProcessType ProcessType
+  -- ^ A mealyNM has a parametrised type for the state, inputs and outputs
   deriving (Data)
 
 instance Pretty ProcessConstructor where
   pretty (Comb inputs outputs inports outports expr) =
     tupled [pretty "comb" <> pretty inputs <> pretty outputs, pretty inports, pretty outports, pretty expr]
   pretty (Delay port ini) =
-    tupled [pretty "delay", pretty port, (pretty . showPprUnsafe) ini]
+    tupled [pretty "delay", pretty port, pretty ini]
+  pretty (Moore inputs outputs stateport inports outports ns od ini) =
+    tupled [pretty "moore" <> pretty inputs <> pretty outputs, pretty stateport, pretty inports, pretty outports, pretty ns, pretty od, pretty ini]
+  pretty (Mealy inputs outputs stateport inports outports ns od ini) =
+    tupled [pretty "mealy" <> pretty inputs <> pretty outputs, pretty stateport, pretty inports, pretty outports, pretty ns, pretty od, pretty ini]
 
 instance Show ProcessConstructor where
   show = show . pretty
@@ -703,19 +716,46 @@ extractProcessType expr = case collectArgs expr of
   (Var v, args) | startsWith combName (getOccString v) ->
     let (_, inout) = splitAt (length combName) (getOccString v)
         (inputs, outputs) = splitAt 1 inout
-    in  multInpOuts (\a b c d e -> MoCProcess expr $ Comb a b c d e) inputs outputs args
+    in  multInpOuts (\ni no ti to f -> MoCProcess expr $ Comb ni no ti to f) inputs outputs args
   (Var v, args) | startsWith farmName (getOccString v) ->
     let (_, inout) = splitAt (length combName) (getOccString v)
         (inputs, outputs) = splitAt 1 inout
-    in  multInpOuts (\a b c d e -> Skeleton expr $ Farm a b c d e) inputs outputs args
+    in  multInpOuts (\ni no ti to f -> Skeleton expr $ Farm ni no ti to f) inputs outputs args
+  (Var v, args) | startsWith mooreName (getOccString v) ->
+    let (_, inout) = splitAt (length mooreName) (getOccString v)
+        (inputs, outputs) = splitAt 1 inout
+    in  fsm (\ni no ts ti to ns od ini -> MoCProcess expr $ Moore ni no ts ti to ns od ini) inputs outputs args
   (Var v, [Type t, appliedExpr]) | getOccString v == delayName ->
-    (MoCProcess expr $ Delay (makePort t) appliedExpr)
+    (MoCProcess expr $ Delay (makePort t) (Core appliedExpr))
   (Var v, [Type t, ini, appliedExpr]) | getOccString v == reduceIName ->
     Skeleton expr $ ReduceI (makePort t) (extractProcessType ini) (extractProcessType appliedExpr)
   (Var v, [Type t, appliedExpr]) | getOccString v == reduceName ->
     Skeleton expr $ Reduce (makePort t) (extractProcessType appliedExpr)
   _ -> Core expr
   where
+    getType :: MonadFail m => Expr a -> m Type
+    getType = \case
+      Type t -> pure t
+      _ -> fail "Not a type"
+    fsm :: (Int -> Int -> Port -> [Port] -> [Port] -> ProcessType -> ProcessType -> ProcessType -> ProcessType) -> String -> String -> [CoreExpr] -> ProcessType
+    fsm con inputs outputs args =
+      case (reads inputs, reads outputs) of
+      ([(iinputs, "")], [(ioutputs, "")]) ->
+        let stateArg = case args of (a:_) -> pure a; _ -> fail "No Arg"
+            (inArgs, args2) = splitAt iinputs . drop 1 $ args
+            (outArgs, expr') = splitAt ioutputs args2
+            out = do
+              stateTy <- getType <$> stateArg >>= id
+              inTys <- traverse getType inArgs
+              outTys <- traverse getType outArgs
+              case expr' of
+                [ns, od, ini] -> pure $ con iinputs ioutputs (makePort stateTy) (map makePort inTys) (map makePort outTys)
+                  (extractProcessType ns) (extractProcessType od) (extractProcessType ini)
+                _ -> fail $ "Argument count mismatch: " <> showPprUnsafe expr'
+        in case out of
+          Just f -> f
+          Nothing -> Core expr
+      _ -> Core expr
     multInpOuts :: (Int -> Int -> [Port] -> [Port] -> ProcessType -> ProcessType) -> String -> String -> [CoreExpr] -> ProcessType
     multInpOuts con inputs outputs args =
       case (reads inputs, reads outputs) of
@@ -724,8 +764,8 @@ extractProcessType expr = case collectArgs expr of
             outArgs = take ioutputs . drop iinputs $ args
             expr' = drop (iinputs + ioutputs) args
             out = do
-              inTys <- traverse (\case Type t -> pure t; _ -> fail "Input arg: not a type") inArgs
-              outTys <- traverse (\case Type t -> pure t; _ -> fail "Output arg: not a type") outArgs
+              inTys <- traverse getType inArgs
+              outTys <- traverse getType outArgs
               case expr' of
                 [applied] -> pure $ con iinputs ioutputs
                   (map makePort inTys) (map makePort outTys) (extractProcessType applied)
@@ -736,6 +776,7 @@ extractProcessType expr = case collectArgs expr of
       _ -> Core expr
     combName = "comb"
     delayName = "delay"
+    mooreName = "moore"
     farmName = "farm"
     reduceName = "reduce"
     reduceIName = "reducei"

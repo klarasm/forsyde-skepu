@@ -593,7 +593,7 @@ helper or processed dierectly
 bodyToStatement :: [(CType, Id IdExt)] -> [(CType, Id IdExt)] -> ProcessType -> (OutputLoc, [((Id IdExt), (CType, CExpression))], CStatement)
 bodyToStatement inports outports = \case
   MoCProcess _ (Comb inputs outputs iports oports expr) -> makeComb inputs outputs inports outports iports oports expr
-  MoCProcess _ (Delay port expr) ->
+  MoCProcess _ (Delay port (Core expr)) ->
         let (_, _, (_, delayExpr)) = exprToCExpr 0 [] [portToC port] (portToC port) inports outports expr
          in ( FunArg
             , map (\(t', i) -> (i, (t', CIR.EVar i))) (inports <> outports)
@@ -606,6 +606,7 @@ bodyToStatement inports outports = \case
                 , CIR.SAssign (CIR.EDereference . CIR.EVar $ ExId IDelay) (CIR.EDereference . CIR.EVar $ ExId Input <> Ix 0)
                 ]
             )
+  MoCProcess _ p -> error $ "Unsupported process constructor: " <> show p
   Skeleton e _ -> func e
   -- Might be a regular function, i.e. not a process
   Core e -> func e
