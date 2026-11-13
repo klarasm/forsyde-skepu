@@ -33,6 +33,7 @@ module ForSyDe.Atom.Synthesis.IR (
 )
 where
 
+import Control.Monad
 import Data.Data (Data, Typeable)
 import Data.List (sort)
 import Data.Maybe (catMaybes, mapMaybe)
@@ -285,9 +286,9 @@ data Vertex a = Vertex
   {- ^ The Id of the applied process or its
   definition if inline
   -}
-  , inputs :: [Id ()]
+  , inputs :: [(Id (), Port)]
   -- ^ Input signals
-  , outputs :: [Id ()]
+  , outputs :: [(Id (), Port)]
   -- ^ Output signals
   , delay :: Bool
   -- ^ If the vertex delays its output
@@ -457,7 +458,7 @@ stripLamApps expr = case expr of
 A process should be self-contained, i.e. not have any communication outside
 of its arguments and return.
 -}
-makeProcess :: Id a -> [Process b] -> Either (Int, CoreExpr, [(Id (), Type)], [(Id (), Type)]) CoreBind -> Maybe (Process b)
+makeProcess :: Id a -> [Process b] -> Either (Int, CoreExpr, [(Id (), Port)], [(Id (), Port)]) CoreBind -> Maybe (Process b)
 makeProcess parent procs = \case
   Right (Rec _) -> Nothing
   Right (NonRec bind expr') ->
@@ -496,7 +497,7 @@ makeProcess parent procs = \case
         , mocData = Nothing
         }
    where
-    (inports, outports) = makePorts (snd <$> inputs, snd <$> outputs)
+    (inports, outports) = (snd <$> inputs, snd <$> outputs)
     subsystem = translateExpr (parent <> Ix ix) procs body
 
 {- | Get all internal function applications of an expression
@@ -540,55 +541,43 @@ translateExpr parent procs expr' = out
   inputs = filter (not . typeOrConstraint . Var) inputs'
   (binds, inputMap, sigs, outputs) = getSignals inputs [] [] expr
   apps' = map (getApplication binds) sigs
-  apps = mapMaybe (resolveTuples apps') apps'
-  varToIdType v = (Direct v, varType v)
+  apps = map appToIdTypes . mapMaybe (resolveTuples apps') $ apps'
+  varToIdType v = (Direct v, makePort . varType $ v)
   appToIdTypes (e, inv, outv) = (e, map varToIdType inv, map varToIdType outv)
   _ = map (\() -> ()) []
   processes =
     filter (\Process{binder} -> not $ elem binder (Direct <$> binds)) $
       getProcesses parent [] expr
-  vertices =
-    catMaybes . zipWith (makeVertex parent (procs <> processes)) [0 ..] . map appToIdTypes $
-      apps <> map (\(v, m) -> (Var v, [v], m)) inputMap
-  edges = mconcat . map (makeEdge vertices . \v -> (Direct v, makePort . varType $ v)) $ binds
+  (ixs, realVertices') = unzip $ zipWith (\ix -> makeVertexFromApps (() <$ parent <> Ix ix) (procs <> processes) ix) [0..] apps
+  realVertices = catMaybes . join $ realVertices'
+  nextix = case ixs of [] -> 0; xs -> maximum xs
+  tupleVertices =
+    catMaybes . zipWith (makeVertex parent (procs <> processes)) [nextix ..] $
+      map (appToIdTypes . \(v, m) -> (Var v, [v], m)) inputMap
+  vertices = realVertices <> tupleVertices
+  edges = makeEdge <$> vertices <*> vertices >>= id
   dependencies =
     mapMaybe
-      ( \Edge{source, target} ->
-          if isDelayVertex vertices source
+      ( \Edge{source, target, delayEdge} ->
+          if delayEdge
             then Nothing
             else Just $ (source, target)
       )
       edges
-  graph = G.buildG (0, length vertices - 1) dependencies
+  graph = G.buildG (0, nextix - 1) dependencies
   -- If there are no self-edges and there are no strongly-connected componets
   -- the graph is a DAG, meaning topological sort can produce a valid schedule
   selfEdges = any (\Edge{source, target} -> source == target) edges
   schedulable = not selfEdges && (all (\(G.Node _ forest) -> forest == []) . G.scc $ graph)
+  schedule = if schedulable then pure $ G.topSort graph else Nothing
   out =
     if length vertices /= 0
-      then
-        pure $
-          System
-            { inputs
-            , outputs
-            , processes
-            , vertices
-            , edges
-            , graph = Just graph
-            , schedule = if schedulable then pure $ G.topSort graph else Nothing
-            }
+      then pure $ System { graph = Just graph , .. }
       else Nothing
 
 -- | Find processes matching the supplied Id
 procsFromId :: Id a -> [Process b] -> [Process b]
 procsFromId var = filter (\Process{binder} -> binder == (() <$ var))
-
--- | True if the integer matches with a delay vertex in the provided list
-isDelayVertex :: [Vertex a] -> Int -> Bool
-isDelayVertex vertices vid =
-  case filter (\Vertex{id = i, delay} -> i == vid && delay) $ vertices of
-    _ : [] -> True
-    _ -> False
 
 {- | True if the Core binder's string is delay and comes from ForSyDe-Atom
 synchronous MoC
@@ -802,7 +791,7 @@ extractProcessType expr = case collectArgs expr of
     reduceIName = "reducei"
 
 -- | Make a process from an expression, input binds and output binds
-makeVertex :: Id a -> [Process b] -> Int -> (CoreExpr, [(Id (), Type)], [(Id (), Type)]) -> Maybe (Vertex b)
+makeVertex :: Id a -> [Process b] -> Int -> (CoreExpr, [(Id (), Port)], [(Id (), Port)]) -> Maybe (Vertex b)
 makeVertex parent procs ix = \case
   -- An application of a non-inline process
   (Var bind, inputs, outputs) ->
@@ -810,8 +799,8 @@ makeVertex parent procs ix = \case
       Vertex
         { id = ix
         , process = Left (Direct bind)
-        , inputs = fst <$> inputs
-        , outputs = fst <$> outputs
+        , inputs
+        , outputs
         , delay = case filter isDelayProcess . procsFromId (Direct bind) $ procs of
             [] -> False
             _ -> True
@@ -824,23 +813,44 @@ makeVertex parent procs ix = \case
       Vertex
         { id = ix
         , process
-        , inputs = fst <$> inputs
-        , outputs = fst <$> outputs
+        , inputs
+        , outputs
         , delay = isDelayProcess proc
         }
 
-{- | Match binders with targets and source from vertices. Note that multiple
-sources should never happen in practice. While GHC Uniques are not
-guarranteed to actually be unique and can shadow, this should never happen
-inside a system definition and should generate an error prior to Core
-generation. Should this happen anyway, it will likely produce a self-edge
-meaning the system won't be schedulable.
+-- | Make vertex from a core expression, and list of input and output signals
+makeVertexFromApps ::
+  Id () ->
+  [Process b] ->
+  Int ->
+  (CoreExpr, [(Id (), Port)], [(Id (), Port)]) ->
+  (Int, [Maybe (Vertex b)])
+makeVertexFromApps parent procs ix = \case
+  (App (App (App (App (App (Var composition) (Type t1)) (Type _)) (Type _)) e1) e2, ins, outs)
+    | getOccString composition == "." ->
+        let intermediate = (parent <> Ix ix <> Ix 0, makePort t1)
+            (ix1, v1) = makeVertexFromApps parent procs (ix) (e1, [intermediate], outs)
+            (ix2, v2) = makeVertexFromApps parent procs (ix + 1) (e2, ins, [intermediate])
+        in (max ix1 ix2, v1 <> v2)
+  (e, ins, outs) ->
+    (ix + 1, pure $ makeVertex parent procs ix (e, ins, outs))
+
+{- | Match binders with targets and source from vertices. sources should never
+ - happen in practice. While GHC Uniques are not guarranteed to actually be
+ - unique and can shadow, this should never happen inside a system definition
+ - and should generate an error prior to Core generation. Should this happen
+ - anyway, it will likely produce a self-edge meaning the system won't be
+ - schedulable.
 -}
-makeEdge :: [Vertex a] -> (Id (), Port) -> [Edge]
-makeEdge vertices (bind, port) = Edge bind port (and delays) <$> source <*> targets
+makeEdge :: Vertex a -> Vertex a -> [Edge]
+makeEdge Vertex{id=source, outputs, delay} Vertex{id=target, inputs} = mapMaybe go outputs
  where
-  (source, delays) = unzip $ [(i, delay) | Vertex{id = i, delay, outputs} <- vertices, bind `elem` outputs]
-  targets = [i | Vertex{id = i, inputs} <- vertices, bind `elem` inputs]
+  go (ident, port) =
+    if ident `elem` map fst inputs
+      then
+        Just $ Edge ident port delay source target
+      else
+        Nothing
 
 -- | Gather all processes referenced by the one corresponding to the string
 filterUnused :: String -> (System a) -> Maybe (Process a, [Process a])

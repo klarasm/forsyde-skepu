@@ -614,13 +614,13 @@ removePoint = \case
 vertexToExpr :: (Foldable t) => t (Id IdExt) -> (Vertex a, CContext) -> CExpression
 vertexToExpr pointers (Vertex{id = _, ..}, CContext{delayStorage}) = case process of
   Right _ -> undefined
-  Left v -> CIR.ECall (IEmpty <$ v) $ map ioToExpr (map (IEmpty <$) inputs) <> map ioToExpr (map (IEmpty <$) outputs) <> delayParams
+  Left v -> CIR.ECall (IEmpty <$ v) $ map ioToExpr (map ((IEmpty <$) . fst) inputs) <> map ioToExpr (map ((IEmpty <$) . fst) outputs) <> delayParams
  where
   delayParams =
     S.elems
       . S.map
         ( \(_, s, _) -> case s of
-            ExId IDelay -> CIR.EVar . (<> ExId IDelay) . (IEmpty <$) . head $ outputs
+            ExId IDelay -> CIR.EVar . (<> ExId IDelay) . (IEmpty <$) . fst . head $ outputs
             _ -> CIR.EVar s
         )
       $ delayStorage
@@ -699,7 +699,7 @@ instance Synthesizable CContext where
                             S.elems delayStorage
                       )
                     <$> delays
-                delayDef var (t, i, e) = (t, (IEmpty <$ var) <> i, e)
+                delayDef var (t, i, e) = (t, (IEmpty <$ fst var) <> i, e)
                 -- Get all delays passed from subsystems.
                 subsysStorage =
                   mconcat
