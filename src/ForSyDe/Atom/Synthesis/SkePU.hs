@@ -315,18 +315,22 @@ skelAppToCExpr tmpix1 ret args stmts1 tin tout inports skel lam assign =
                 []
             ]
         _ -> Nothing
+      outDerefed = derefTo CIR.TVoid (fst outname) $ CIR.EVar . snd $ outname
       call =
         CIR.ECall skelInstance $
           case ret of
-            FunArg -> [derefTo CIR.TVoid (fst outname) $ CIR.EVar . snd $ outname] <> inputs
+            FunArg -> [outDerefed] <> inputs
             Return -> inputs
       stmts =
-        [ uncurry CIR.SVarDecl outname ini
-        , CIR.SVarDef CIR.TAuto skelInstance Nothing $ CIR.ECall skel [lam]
-        ]
-          <> case ret of
-            FunArg -> [CIR.SExpr call]
-            Return -> []
+        case assign of
+          Nothing -> [uncurry CIR.SVarDecl outname ini]
+          _ ->  case ini of
+            Just ini' -> [CIR.SExpr $ CIR.ECallExpr (CIR.EMemberAccess outDerefed . ExId $ Name "init") ini']
+            _ -> []
+        <> [CIR.SVarDef CIR.TAuto skelInstance Nothing $ CIR.ECall skel [lam]]
+        <> case ret of
+          FunArg -> [CIR.SExpr call]
+          Return -> []
    in ( tmpix3
       , stmts1 <> stmts
       , case ret of
@@ -400,7 +404,7 @@ exprToCExpr tmpix args tin tout inports assign = \case
                   -- All skeleton farm applications
       (_, _, Just (ret, skel), tys, _, [argExpr], argVars) ->
         let (tmpix1, stmts1, (_, lam)) = exprToLambda tmpix ret args (map Direct argVars) (map exprToCType . take (length tin) $ tys) tout inports argExpr
-         in skelAppToCExpr tmpix1 ret args stmts1 tin tout inports skel lam Nothing
+         in skelAppToCExpr tmpix1 ret args stmts1 tin tout inports skel lam assign
       -- Vector length (two parametrised types and one type constraint)
       (Var inner, Just ([tv], [tvout]), _, [_, _, _], [e1], _, _) | not $ tv `eqType` tvout ->
         let (tmpix1, stmts1, (t1', expr1)) = exprToCExpr tmpix args tin (exprToCType e1) inports Nothing e1
@@ -461,13 +465,17 @@ makeMap :: [CoreBndr] -> [(a2, Id a)] -> [((Id a), (a2, CIR.Expression (Id a)))]
 makeMap [] ports = map (\(ty, ident) -> (ident, (ty, CIR.EVar ident))) ports
 makeMap args ports = zipWith (\b (t, _) -> (Direct b, (t, CIR.EVar (Direct b)))) args ports
 
-assignOutputs :: (a1  -> a2  -> Maybe CDecl  -> b2  -> (a4, [CStatement], (a5, CExpression))) -> (a1, [CStatement]) -> ((a2, b2), CDecl) -> (a4, [CStatement])
+assignOutputs :: (a1  -> a2  -> Maybe CDecl  -> b2  -> (a4, [CStatement], (CType, CExpression))) -> (a1, [CStatement]) -> ((a2, b2), CDecl) -> (a4, [CStatement])
 assignOutputs fun (cntr, stmts) ((tout, expr), outport@(ty, ident)) = (cntr1, stmts1) where
   (cntr1, init1, tyE1) = fun cntr tout (Just outport) expr
+  assignTo = (derefTo CIR.TVoid ty $ CIR.EVar ident)
+  assignFrom = (derefTo CIR.TVoid (fst tyE1) $ snd tyE1)
   stmts1 =
     stmts
       <> init1
-      <> [CIR.SAssign (derefTo CIR.TVoid ty $ CIR.EVar ident) (snd tyE1)]
+      <> if assignTo /= assignFrom
+        then [CIR.SAssign (derefTo CIR.TVoid ty $ CIR.EVar ident) (derefTo CIR.TVoid (fst tyE1) $ snd tyE1)]
+        else []
 
 -- | Create combNM process
 makeComb ::
