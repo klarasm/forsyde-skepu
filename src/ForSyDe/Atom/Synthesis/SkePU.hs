@@ -247,8 +247,8 @@ resolveOp _ _ _ _ = undefined
 {- | Wrap a C expression into a lambda, returning that as a statement and the
 expression to call it.
 -}
-exprToLambda :: Int -> OutputLoc -> [CArg] -> [CId] -> [CType] -> CType -> [CDecl] -> CoreExpr -> (Int, [CStatement], (CType, CExpression))
-exprToLambda tmpix outLoc args largs tin tout inports expr = case expr of
+exprToLambda :: Int -> [CArg] -> [CType] -> CType -> CoreExpr -> (Int, [CStatement], (CType, CExpression))
+exprToLambda tmpix args tin tout expr = case expr of
   -- A function passed as a value (with type constraints). Construct a lambda
   App (App (Var f) t1) t2
     | typeOrConstraint t1 && typeOrConstraint t2 ->
@@ -289,7 +289,7 @@ exprToLambda tmpix outLoc args largs tin tout inports expr = case expr of
     let (b1, e1) = collectBinders e
         args' = map varToArgMap b1
         varToArgMap v = (Direct v, (varToCType v, CIR.EVar (Direct v)))
-     in exprToLambda tmpix outLoc (args' <> args) largs tin tout inports e1
+     in exprToLambda tmpix (args' <> args) tin tout e1
   e ->
     let args' = map (\(i1, (t, i2)) -> (i1, (removePoint t, i2))) args
         (tmpix1, stmts1, (_, expr1)) = exprToCExpr tmpix args' tin tout (zip tin inputIds) Nothing e
@@ -409,10 +409,10 @@ exprToCExpr tmpix args tin tout inports assign = \case
   e ->
     case decomposeAndSkeleton e of
       -- Reduce(i)
-      (Var v, _, Just (ret, skel), tys, _, [fun, ini], input)
+      (Var v, _, Just (ret, skel), tys, _, [fun, ini], _)
         | getOccString v == "reducei" ->
             let (tmpix1, stmts1, (_, eIni)) = exprToCExpr tmpix args tin tout inports Nothing ini
-                (tmpix2, stmts2, (_, lam)) = exprToLambda tmpix1 ret args (map Direct input) (map exprToCType . take (length tin) $ tys) tout inports fun
+                (tmpix2, stmts2, (_, lam)) = exprToLambda tmpix1 args (map exprToCType . take (length tin) $ tys) tout fun
                 (tmpix3, stmts3, (t2, e2)) = skelAppToCExpr tmpix2 ret args (stmts1 <> stmts2) tin tout inports skel lam Nothing
              in case e2 of
                   CIR.ECall skelInstance _ ->
@@ -420,8 +420,8 @@ exprToCExpr tmpix args tin tout inports assign = \case
                      in (tmpix3, stmts1 <> stmts2 <> stmts3 <> stmts4, (t2, e2))
                   _ -> undefined -- This should not happen, skelApptToCExpr will always pass a ECall
       -- All skeleton farm applications
-      (_, _, Just (ret, skel), tys, _, [argExpr], argVars) ->
-        let (tmpix1, stmts1, (_, lam)) = exprToLambda tmpix ret args (map Direct argVars) (map exprToCType . take (length tin) $ tys) tout inports argExpr
+      (_, _, Just (ret, skel), tys, _, [argExpr], _) ->
+        let (tmpix1, stmts1, (_, lam)) = exprToLambda tmpix args (map exprToCType . take (length tin) $ tys) tout argExpr
          in skelAppToCExpr tmpix1 ret args stmts1 tin tout inports skel lam assign
       -- Vector length (two parametrised types and one type constraint)
       (Var inner, Just ([tv], [tvout]), _, [_, _, _], [e1], _, _) | not $ tv `eqType` tvout ->
