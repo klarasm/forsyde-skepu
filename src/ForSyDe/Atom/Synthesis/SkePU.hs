@@ -505,9 +505,8 @@ makeComb ::
   [CDecl] -> [CDecl] ->
   [Port] -> [Port] ->
   ProcessType ->
-  (OutputLoc, [CArg], CStatement)
+  (OutputLoc, [CArg], [CArg], [CArg], CStatement)
 makeComb _ _ inports outports liports loports pt =
-  -- TODO: should split the input args and outputs
   let (args, expr) = collectBinders . coreFromProcType $ pt
       argMap = makeMap args inports
       outArgs = makeMap [] outports
@@ -524,7 +523,9 @@ makeComb _ _ inports outports liports loports pt =
                   (cntr2, init3, (_, ea3)) = exprToCExpr cntr1 argMap tys' tout3 inports outports e3
                   (_, init4, (_, ea4)) = exprToCExpr cntr2 argMap tys' tout4 inports outports e4
                in ( FunArg
-                  , argMap <> outArgs
+                  , argMap
+                  , outArgs
+                  , []
                   , CIR.SScope $
                       init1
                         <> init2
@@ -542,7 +543,9 @@ makeComb _ _ inports outports liports loports pt =
                   (cntr1, init2, (_, ea2)) = exprToCExpr cntr argMap tys' tout2 inports outports e2
                   (_, init3, (_, ea3)) = exprToCExpr cntr1 argMap tys' tout3 inports outports e3
                in ( FunArg
-                  , argMap <> outArgs
+                  , argMap
+                  , outArgs
+                  , []
                   , CIR.SScope $
                       init1
                         <> init2
@@ -557,7 +560,9 @@ makeComb _ _ inports outports liports loports pt =
                   (cntr, init1, (_, ea1)) = exprToCExpr 0 argMap tys' tout1 inports outports e1
                   (_, init2, (_, ea2)) = exprToCExpr cntr argMap tys' tout2 inports outports e2
                in ( FunArg
-                  , argMap <> outArgs
+                  , argMap
+                  , outArgs
+                  , []
                   , CIR.SScope $
                       init1
                         <> init2
@@ -567,7 +572,9 @@ makeComb _ _ inports outports liports loports pt =
           let tout1 = portToC $ last loports
               (_, init1, (_, ea1)) = exprToCExpr 0 argMap (map portToC liports) tout1 inports outports expr
            in ( FunArg
-              , argMap <> outArgs
+              , argMap
+              , outArgs
+              , []
               , CIR.SScope $
                   init1
                     <> zipWith (\(ty, ident) e -> CIR.SAssign (derefTo CIR.TVoid ty $ CIR.EVar ident) e) outports [ea1]
@@ -576,14 +583,15 @@ makeComb _ _ inports outports liports loports pt =
 {- | Here all the process constructors are recognised and either passed to a
 helper or processed dierectly
 -}
-bodyToStatement :: [CDecl] -> [CDecl] -> ProcessType -> (OutputLoc, [CArg], CStatement)
+bodyToStatement :: [CDecl] -> [CDecl] -> ProcessType -> (OutputLoc, [CArg], [CArg], [CArg], CStatement)
 bodyToStatement inports outports = \case
   MoCProcess _ (Comb inputs outputs iports oports expr) -> makeComb inputs outputs inports outports iports oports expr
   MoCProcess _ (Delay port (Core expr)) ->
         let (_, _, (_, delayExpr)) = exprToCExpr 0 [] [portToC port] (portToC port) inports outports expr
          in ( FunArg
-            , map (\(t', i) -> (i, (t', CIR.EVar i))) (inports <> outports)
-                <> zipWith (\i (t', _) -> (i, (t', delayExpr))) [ExId IDelay] outports
+            , map (\(t', i) -> (i, (t', CIR.EVar i))) inports
+            , map (\(t', i) -> (i, (t', CIR.EVar i))) outports
+            , zipWith (\i (t', _) -> (i, (t', delayExpr))) [ExId IDelay] outports
             , -- The delay can both be used on intermediary signals and input/output
               -- signals. When used on an output signal, it needs to also output the
               -- current value of the delay, hence the shuffling of values.
@@ -604,6 +612,8 @@ bodyToStatement inports outports = \case
         (_, stmts, (_, expr)) = exprToCExpr 0 argMap (map fst inports) (fst . head $ outports) inports outports expr'
      in ( Return
         , argMap
+        , []
+        , []
         , CIR.SScope $
             stmts
               <> [CIR.SReturn . Just $ expr]
@@ -643,8 +653,7 @@ instance Synthesizable CContext where
           Nothing ->
             let inputs = zip (map portToC inports) inputIds
                 outputs = zip (map portToC outports) outputIds
-                (retLoc, argMap, body') = bodyToStatement inputs outputs procType
-                delay = length argMap > length inputs + length outputs
+                (retLoc, argMap, outArgs, stateArgs, body') = bodyToStatement inputs outputs procType
                 argToDef (k, (t, _)) = (t, k)
                 context =
                   CContext
@@ -652,15 +661,12 @@ instance Synthesizable CContext where
                     , ret = case retLoc of
                         FunArg -> CIR.TVoid
                         Return -> fst . head $ outputs
-                    , inputs = map argToDef . take (length inports) $ argMap
+                    , inputs = map argToDef argMap
                     , outputs = case retLoc of
-                        FunArg -> map argToDef . take (length outports) . drop (length inports) $ argMap
+                        FunArg -> map argToDef outArgs
                         Return -> mempty
-                    , delayStorage =
-                        S.fromList
-                          . drop (length inports + length outports)
-                          $ argMap
-                    , delay
+                    , delayStorage = S.fromList stateArgs
+                    , delay = not . null $ stateArgs
                     , body = body'
                     , program = Nothing
                     }
