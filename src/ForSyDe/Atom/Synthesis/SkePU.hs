@@ -479,9 +479,12 @@ derefTo :: CIR.Type a1 -> CIR.Type a2 -> CIR.Expression a -> CIR.Expression a
 derefTo outty inty = derefArg (needDeref (0 :: Int) (inty, outty))
 
 -- | Make an argument map, from args if existent otherwise from ports
-makeMap :: [CoreBndr] -> [(a2, Id a)] -> [((Id a), (a2, CIR.Expression (Id a)))]
-makeMap [] ports = map (\(ty, ident) -> (ident, (ty, CIR.EVar ident))) ports
-makeMap args ports = zipWith (\b (t, _) -> (Direct b, (t, CIR.EVar (Direct b)))) args ports
+makeMap :: [CoreBndr] -> [(a2, Id a)] -> [(Id a, (a2, CIR.Expression (Id a)))]
+makeMap args ports = fmap (fmap (CIR.EVar)) <$> updatePorts args ports
+
+updatePorts :: [CoreBndr] -> [(a2, Id a)] -> [((Id a), (a2, Id a))]
+updatePorts [] ports = map (\(ty, ident) -> (ident, (ty, ident))) ports
+updatePorts args ports = zipWith (\b (t, _) -> (Direct b, (t, (Direct b)))) args ports
 
 assignOutputs :: (a1  -> a2  -> Maybe CDecl  -> b2  -> (a4, [CStatement], (CType, CExpression))) -> (a1, [CStatement]) -> ((a2, b2), CDecl) -> (a4, [CStatement])
 assignOutputs fun (cntr, stmts) ((tout, expr), outport@(ty, ident)) = (cntr1, stmts1) where
@@ -504,10 +507,11 @@ makeComb ::
   (OutputLoc, [CArg], [CArg], [CArg], CStatement)
 makeComb _ _ inports outports liports loports pt =
   let (args, expr) = collectBinders . coreFromProcType $ pt
-      argMap = makeMap args inports
+      newInPorts = updatePorts args inports
+      argMap = fmap (fmap CIR.EVar) <$> newInPorts
       outArgs = makeMap [] outports
       tys' = map portToC liports
-      assign tys cntr tout a e = exprToCExpr cntr argMap tys tout inports a e
+      assign tys cntr tout a e = exprToCExpr cntr argMap tys tout (map snd newInPorts) a e
    in case decomposeExpr expr of
         (Var v, touts, argExprs, [])
           | (isTupleConstructor . getResType . varType $ v) ->
