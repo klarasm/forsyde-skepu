@@ -157,6 +157,28 @@ data OutputLoc
   = FunArg
   | Return
 
+-- Get the corresponding SkePU skeleton from the function name
+skelToSkePU :: String -> Maybe (OutputLoc, CId)
+skelToSkePU = \case
+  "reducei" -> Just (Return, ExId IReduce)
+  "farm11" -> Just (FunArg, ExId Map <> (ExId $ Name "<1>"))
+  "farm12" -> Just (FunArg, ExId Map <> (ExId $ Name "<1>"))
+  "farm13" -> Just (FunArg, ExId Map <> (ExId $ Name "<1>"))
+  "farm14" -> Just (FunArg, ExId Map <> (ExId $ Name "<1>"))
+  "farm21" -> Just (FunArg, ExId Map <> (ExId $ Name "<2>"))
+  "farm22" -> Just (FunArg, ExId Map <> (ExId $ Name "<2>"))
+  "farm23" -> Just (FunArg, ExId Map <> (ExId $ Name "<2>"))
+  "farm24" -> Just (FunArg, ExId Map <> (ExId $ Name "<2>"))
+  "farm31" -> Just (FunArg, ExId Map <> (ExId $ Name "<3>"))
+  "farm32" -> Just (FunArg, ExId Map <> (ExId $ Name "<3>"))
+  "farm33" -> Just (FunArg, ExId Map <> (ExId $ Name "<3>"))
+  "farm34" -> Just (FunArg, ExId Map <> (ExId $ Name "<3>"))
+  "farm41" -> Just (FunArg, ExId Map <> (ExId $ Name "<4>"))
+  "farm42" -> Just (FunArg, ExId Map <> (ExId $ Name "<4>"))
+  "farm43" -> Just (FunArg, ExId Map <> (ExId $ Name "<4>"))
+  "farm44" -> Just (FunArg, ExId Map <> (ExId $ Name "<4>"))
+  _ -> Nothing
+
 -- | Match names of functions to C operations.
 resolveOp ::
   Int ->
@@ -357,12 +379,8 @@ decomposeExpr = goVars []
 -- | Decompose expression and check for skeleton and type
 decomposeAndSkeleton :: Expr CoreBndr -> (Expr CoreBndr, Maybe ([Type], [Type]), Maybe (OutputLoc, CId), [Arg CoreBndr], [Expr CoreBndr], [Expr CoreBndr], [CoreBndr])
 decomposeAndSkeleton e = case decomposeExpr e of
-  (base@(Var v), tys, exprs, vars) -> let
-    skel = case extractProcessType e of
-      Skeleton _ (Farm i _ _ _ _) -> Just (FunArg, ExId Map <> ExId (Name $ "<" <> show i <> ">"))
-      Skeleton _ (ReduceI _ _ _) -> Just (Return, ExId IReduce)
-      _ -> Nothing
-    in (base, Just $ extractTypes [] . varType $ v, skel, tys, exprs <> map Var vars, exprs, vars)
+  (base@(Var v), tys, exprs, vars) ->
+    (base, Just $ extractTypes [] . varType $ v, skelToSkePU . getOccString $ v, tys, exprs <> map Var vars, exprs, vars)
   (base, tys, exprs, vars) ->
     (base, Nothing, Nothing, tys, exprs <> map Var vars, exprs, vars)
 
