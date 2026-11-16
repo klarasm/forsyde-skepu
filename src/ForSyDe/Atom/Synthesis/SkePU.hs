@@ -14,7 +14,6 @@ module ForSyDe.Atom.Synthesis.SkePU (
 import GHC.Core
 import GHC.Core.TyCo.Compare
 import GHC.Core.TyCo.Rep
-import GHC.Core.TyCon
 import GHC.Core.Type
 import GHC.Types.Literal
 import GHC.Types.Name (getOccString)
@@ -94,50 +93,32 @@ portToC = \case
     CIR.TConstructor (CIR.TIdent $ ExId IVector) (portToC p)
   Opaque t -> typeToCType t
 
+typeStringToCType :: String -> CIR.Type a
+typeStringToCType = \case
+  "Int" -> CIR.TLong
+  "Integer" -> CIR.TLong
+  "Float" -> CIR.TFloat
+  "Double" -> CIR.TDouble
+  t -> error $ "Unknown type: " <> t
+
 -- | Map GHC types into C types
 typeToCType :: Type -> CType
 typeToCType = \case
-  TyVarTy v
-    | getOccString v == "Int" -> CIR.TLong
-    | getOccString v == "Integer" -> CIR.TLong
-    | getOccString v == "Float" -> CIR.TFloat
-    | getOccString v == "Double" -> CIR.TDouble
-  TyVarTy v -> error $ "TyVarTy: " <> showPprUnsafe v
-  TyConApp v []
-    | getOccString v == "Int" -> CIR.TLong
-    | getOccString v == "Integer" -> CIR.TLong
-    | getOccString v == "Float" -> CIR.TFloat
-    | getOccString v == "Double" -> CIR.TDouble
+  TyVarTy v -> typeStringToCType $ getOccString v
+  TyConApp v [] -> typeStringToCType $ getOccString v
   TyConApp v1 [v2]
     | getOccString v1 == "Num" -> case v2 of
-        TyVarTy v2'
-          | getOccString v2' == "Integer" -> CIR.TLong
-          | getOccString v2' == "Int" -> CIR.TLong
-          | getOccString v2' == "Float" -> CIR.TFloat
-          | getOccString v2' == "Double" -> CIR.TDouble
-        TyConApp v2' _
-          | getOccString v2' == "Integer" -> CIR.TLong
-          | getOccString v2' == "Int" -> CIR.TLong
-          | getOccString v2' == "Float" -> CIR.TFloat
-          | getOccString v2' == "Double" -> CIR.TDouble
-        _ -> error . showPprUnsafe $ v2
+        TyVarTy v2' -> typeStringToCType $ getOccString v2'
+        TyConApp v2' _ -> typeStringToCType $ getOccString v2'
+        _ -> error $ "Unknown type: " <> showPprUnsafe v1
     | getOccString v1 == "Ord" -> case v2 of
-        TyVarTy v2'
-          | getOccString v2' == "Integer" -> CIR.TLong
-          | getOccString v2' == "Int" -> CIR.TLong
-          | getOccString v2' == "Float" -> CIR.TFloat
-          | getOccString v2' == "Double" -> CIR.TDouble
-        TyConApp v2' _
-          | getOccString v2' == "Integer" -> CIR.TLong
-          | getOccString v2' == "Int" -> CIR.TLong
-          | getOccString v2' == "Float" -> CIR.TFloat
-          | getOccString v2' == "Double" -> CIR.TDouble
-        _ -> error . showPprUnsafe $ v2
+        TyVarTy v2' -> typeStringToCType $ getOccString v2'
+        TyConApp v2' _ -> typeStringToCType $ getOccString v2'
+        _ -> error $ "Unknown type: " <> showPprUnsafe v1
   TyConApp v1 _ | getOccString v1 == "Floating" -> CIR.TFloat
   TyConApp v1 _ | getOccString v1 == "Fractional" -> CIR.TFloat
   TyConApp v1 _ | getOccString v1 == "Integral" -> CIR.TLong
-  TyConApp v a -> error $ "TyConApp: " <> (getOccString . tyConName) v <> " " <> showPprUnsafe a
-  t -> error $ "Something else: " <> showPprUnsafe t
+  t -> error $ "Unknown type: " <> showPprUnsafe t
 
 -- | Make a C type of a GHC var
 varToCType :: Var -> CType
