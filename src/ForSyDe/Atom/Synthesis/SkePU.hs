@@ -65,7 +65,7 @@ data CContext = CContext
   , ret :: CType
   , inputs :: [CDecl]
   , outputs :: [CDecl]
-  , delayStorage :: S.Set (CType, Id IdExt, CExpression)
+  , delayStorage :: S.Set CArg
   , delay :: Bool
   , body :: CStatement
   , program :: Maybe CProgram
@@ -622,7 +622,7 @@ vertexToExpr pointers (Vertex{id = _, ..}, CContext{delayStorage}) = case proces
   delayParams =
     S.elems
       . S.map
-        ( \(_, s, _) -> case s of
+        ( \(s, _) -> case s of
             ExId IDelay -> CIR.EVar . (<> ExId IDelay) . (IEmpty <$) . fst . head $ outputs
             _ -> CIR.EVar s
         )
@@ -658,7 +658,6 @@ instance Synthesizable CContext where
                         Return -> mempty
                     , delayStorage =
                         S.fromList
-                          . map (\(i', (t', e')) -> (t', i', e'))
                           . drop (length inports + length outports)
                           $ argMap
                     , delay
@@ -702,7 +701,7 @@ instance Synthesizable CContext where
                             S.elems delayStorage
                       )
                     <$> delays
-                delayDef var (t, i, e) = (t, (IEmpty <$ fst var) <> i, e)
+                delayDef var (i, (t, e)) = ((IEmpty <$ fst var) <> i, (t, e))
                 -- Get all delays passed from subsystems.
                 subsysStorage =
                   mconcat
@@ -848,7 +847,7 @@ instance Synthesizable CContext where
         (ExId $ Name "main")
         [(CIR.TInt, ExId $ Name "argc"), (CIR.TPointer . CIR.TPointer $ CIR.TChar, ExId $ Name "argv")]
         $ CIR.SScope
-        $ map (\(t, v, e) -> CIR.SVarDef (removePoint t) v Nothing e) (S.elems delayStorage)
+        $ map (\(v, (t, e)) -> CIR.SVarDef (removePoint t) v Nothing e) (S.elems delayStorage)
           <> [ CIR.SWhile (CIR.EInt 1) $
                  CIR.SScope $
                    map (\(t, v) -> CIR.SVarDecl (removePoint t) v Nothing) (inputs <> outputs)
@@ -857,18 +856,18 @@ instance Synthesizable CContext where
                      <> [ CIR.SExpr $
                             CIR.ECall (IEmpty <$ from) $
                               map getArg $
-                                inputs <> outputs <> (S.elems $ S.map (\(t, v, _) -> (t, v)) $ delayStorage)
+                                inputs <> outputs <> (S.elems $ S.map (\(v, (t, _)) -> (t, v)) $ delayStorage)
                         ]
                      <> (mconcat . map putOutput) outputs
              ]
           <> [CIR.SReturn $ Just $ CIR.EInt $ -1]
     contextToGlobal CContext{..} =
       ( CIR.GFuncDeclare (Just CIR.Static) ret (IEmpty <$ from) $
-          inputs <> outputs <> (S.elems . S.map (\(t, n, _) -> (t, n))) delayStorage
+          inputs <> outputs <> (S.elems . S.map (\(n, (t, _)) -> (t, n))) delayStorage
       , CIR.GFuncDef
           (Just CIR.Static)
           ret
           (IEmpty <$ from)
-          (inputs <> outputs <> (S.elems . S.map (\(t, n, _) -> (t, n))) delayStorage)
+          (inputs <> outputs <> (S.elems . S.map (\(n, (t, _)) -> (t, n))) delayStorage)
           body
       )
