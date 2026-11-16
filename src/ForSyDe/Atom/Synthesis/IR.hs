@@ -32,6 +32,7 @@ module ForSyDe.Atom.Synthesis.IR (
   getResType,
   isTupleConstructor,
   coreFromProcType,
+  extractProcessType,
 )
 where
 
