@@ -401,7 +401,7 @@ exprToCExpr tmpix args tin tout inports assign = \case
                     let stmts4 = [CIR.SExpr $ CIR.ECallExpr (CIR.EMemberAccess (CIR.EVar skelInstance) (ExId $ Name "setStartValue")) [eIni]]
                      in (tmpix3, stmts1 <> stmts2 <> stmts3 <> stmts4, (t2, e2))
                   _ -> undefined -- This should not happen, skelApptToCExpr will always pass a ECall
-                  -- All skeleton farm applications
+      -- All skeleton farm applications
       (_, _, Just (ret, skel), tys, _, [argExpr], argVars) ->
         let (tmpix1, stmts1, (_, lam)) = exprToLambda tmpix ret args (map Direct argVars) (map exprToCType . take (length tin) $ tys) tout inports argExpr
          in skelAppToCExpr tmpix1 ret args stmts1 tin tout inports skel lam assign
