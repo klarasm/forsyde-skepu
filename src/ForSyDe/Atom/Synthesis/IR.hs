@@ -716,7 +716,7 @@ resolveTuples apps (proc, inputs, output, _) = Just (proc, inputs, outputs)
 startsWith :: Eq a => [a] -> [a] -> Bool
 startsWith a b =
   let comb = zipWith (==) a b
-  in all id comb && length a == length comb
+  in and comb && length a == length comb
 
 extractProcessType :: CoreExpr -> ProcessType
 extractProcessType expr = case collectArgs expr of
