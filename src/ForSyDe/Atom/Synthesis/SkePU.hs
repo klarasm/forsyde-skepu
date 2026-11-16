@@ -266,8 +266,8 @@ resolveOp _ _ _ _ = undefined
 {- | Wrap a C expression into a lambda, returning that as a statement and the
 expression to call it.
 -}
-exprToLambda :: Int -> OutputLoc -> [CArg] -> [CId] -> [CType] -> CType -> [CDecl] -> [CDecl] -> CoreExpr -> (Int, [CStatement], (CType, CExpression))
-exprToLambda tmpix outLoc args largs tin tout inports outports expr = case expr of
+exprToLambda :: Int -> OutputLoc -> [CArg] -> [CId] -> [CType] -> CType -> [CDecl] -> CoreExpr -> (Int, [CStatement], (CType, CExpression))
+exprToLambda tmpix outLoc args largs tin tout inports expr = case expr of
   -- A function passed as a value (with type constraints). Construct a lambda
   App (App (Var f) t1) t2
     | typeOrConstraint t1 && typeOrConstraint t2 ->
@@ -308,10 +308,10 @@ exprToLambda tmpix outLoc args largs tin tout inports outports expr = case expr 
     let (b1, e1) = collectBinders e
         args' = map varToArgMap b1
         varToArgMap v = (Direct v, (varToCType v, CIR.EVar (Direct v)))
-     in exprToLambda tmpix outLoc (args' <> args) largs tin tout inports outports e1
+     in exprToLambda tmpix outLoc (args' <> args) largs tin tout inports e1
   e ->
     let args' = map (\(i1, (t, i2)) -> (i1, (removePoint t, i2))) args
-        (tmpix1, stmts1, (_, expr1)) = exprToCExpr tmpix args' tin tout (zip tin inputIds) outports e
+        (tmpix1, stmts1, (_, expr1)) = exprToCExpr tmpix args' tin tout (zip tin inputIds) e
         inExpr = CIR.getVars expr1
         explicit = map (\(i, _) -> i) . filter (\(i, _) -> elem i inExpr) $ args'
         notInArgs = filter (not . flip elem explicit) . sort $ inExpr
@@ -400,8 +400,8 @@ decomposeAndSkeleton e = case decomposeExpr e of
 {- | Traverse a GHC Core expression and transform it into a C expression (and
 possibly statements).
 -}
-exprToCExpr :: Int -> [CArg] -> [CType] -> CType -> [CDecl] -> [CDecl] -> CoreExpr -> (Int, [CStatement], (CType, CExpression))
-exprToCExpr tmpix args tin tout inports outports expr = case expr of
+exprToCExpr :: Int -> [CArg] -> [CType] -> CType -> [CDecl] -> CoreExpr -> (Int, [CStatement], (CType, CExpression))
+exprToCExpr tmpix args tin tout inports = \case
   -- Literals
   App _ (Lit (LitNumber _ i)) -> (tmpix, [], (CIR.TLong, CIR.EInt $ fromIntegral i))
   Lit (LitNumber _ i) -> (tmpix, [], (CIR.TLong, CIR.EInt $ fromIntegral i))
@@ -424,8 +424,8 @@ exprToCExpr tmpix args tin tout inports outports expr = case expr of
       -- Reduce(i)
       (Var v, _, Just (ret, skel), tys, _, [fun, ini], input)
         | getOccString v == "reducei" ->
-            let (tmpix1, stmts1, (_, eIni)) = exprToCExpr tmpix args tin tout inports outports ini
-                (tmpix2, stmts2, (_, lam)) = exprToLambda tmpix1 ret args (map Direct input) (map exprToCType . take (length tin) $ tys) tout inports outports fun
+            let (tmpix1, stmts1, (_, eIni)) = exprToCExpr tmpix args tin tout inports ini
+                (tmpix2, stmts2, (_, lam)) = exprToLambda tmpix1 ret args (map Direct input) (map exprToCType . take (length tin) $ tys) tout inports fun
                 (tmpix3, stmts3, (t2, e2)) = skelAppToCExpr tmpix2 ret args (stmts1 <> stmts2) tin tout inports skel lam
              in case e2 of
                   CIR.ECall skelInstance _ ->
@@ -434,20 +434,20 @@ exprToCExpr tmpix args tin tout inports outports expr = case expr of
                   _ -> undefined -- This should not happen, skelApptToCExpr will always pass a ECall
                   -- All skeleton farm applications
       (_, _, Just (ret, skel), tys, _, [argExpr], argVars) ->
-        let (tmpix1, stmts1, (_, lam)) = exprToLambda tmpix ret args (map Direct argVars) (map exprToCType . take (length tin) $ tys) tout inports outports argExpr
+        let (tmpix1, stmts1, (_, lam)) = exprToLambda tmpix ret args (map Direct argVars) (map exprToCType . take (length tin) $ tys) tout inports argExpr
          in skelAppToCExpr tmpix1 ret args stmts1 tin tout inports skel lam
       -- Vector length (two parametrised types and one type constraint)
       (Var inner, Just ([tv], [tvout]), _, [_, _, _], [e1], _, _) | not $ tv `eqType` tvout ->
-        let (tmpix1, stmts1, (t1', expr1)) = exprToCExpr tmpix args tin (exprToCType e1) inports outports e1
+        let (tmpix1, stmts1, (t1', expr1)) = exprToCExpr tmpix args tin (exprToCType e1) inports e1
          in resolveOp tmpix1 stmts1 [(t1', expr1)] tout $ getOccString inner
       -- A fully applied binary function (one parametrised type and one type constraint)
       (Var inner, Just ([tv1, tv2], [tvout]), _, [t1, _], [e1, e2], _, _)  | tv1 `eqType` tvout && tv2 `eqType` tvout ->
-        let (tmpix1, stmts1, (t1', expr1)) = exprToCExpr tmpix args tin (exprToCType t1) inports outports e1
-            (tmpix2, stmts2, (t2', expr2)) = exprToCExpr tmpix1 args tin (exprToCType t1) inports outports e2
+        let (tmpix1, stmts1, (t1', expr1)) = exprToCExpr tmpix args tin (exprToCType t1) inports e1
+            (tmpix2, stmts2, (t2', expr2)) = exprToCExpr tmpix1 args tin (exprToCType t1) inports e2
          in resolveOp tmpix2 (stmts1 <> stmts2) [(t1', expr1), (t2', expr2)] tout $ getOccString inner
       -- A partially applied binary function (one parametrised type and one type constraint)
       (Var inner, Just ([tv1, tv2], [tvout]), _, [t1, _], [e1], _, _) | tv1 `eqType` tvout && tv2 `eqType` tvout ->
-        let (tmpix1, stmts1, (t1', expr1)) = exprToCExpr tmpix args tin (exprToCType t1) inports outports e1
+        let (tmpix1, stmts1, (t1', expr1)) = exprToCExpr tmpix args tin (exprToCType t1) inports e1
             v1 = derefTo (exprToCType t1) (fst . head $ inports) $ CIR.EVar $ ExId Input <> Ix 0
          in resolveOp tmpix1 stmts1 [(t1', expr1), (exprToCType t1, v1)] tout $ getOccString inner
       -- An unapplied binary function (one parametrised type and one type constraint)
@@ -455,18 +455,18 @@ exprToCExpr tmpix args tin tout inports outports expr = case expr of
         resolveOp 0 [] (take 2 . map snd $ args) tout $ getOccString inner
       -- A fully applied unary function (one parametrised type)
       (Var inner, Just ([tv], [tvout]), _, [t1], [e1], _, _) | tv `eqType` tvout ->
-        let (tmpix1, stmts1, (t1', expr1)) = exprToCExpr tmpix args tin (exprToCType t1) inports outports e1
+        let (tmpix1, stmts1, (t1', expr1)) = exprToCExpr tmpix args tin (exprToCType t1) inports e1
          in resolveOp tmpix1 stmts1 [(t1', expr1)] tout $ getOccString inner
       -- A fully applied unary function (one parametrised type)
       (Var inner, Just ([tv], [tvout]), _, [t1, _], [e1], _, _) | tv `eqType` tvout ->
-        let (tmpix1, stmts1, (t1', expr1)) = exprToCExpr tmpix args tin (exprToCType t1) inports outports e1
+        let (tmpix1, stmts1, (t1', expr1)) = exprToCExpr tmpix args tin (exprToCType t1) inports e1
          in resolveOp tmpix1 stmts1 [(t1', expr1)] tout $ getOccString inner
       -- An unapplied unary function (one parametrised type)
       (Var inner, Just ([tv], [tvout]), _, [_], [], [], []) | tv `eqType` tvout ->
         resolveOp 0 [] (take 1 . map snd $ args) tout $ getOccString inner
       -- A fully applied unary function (two parametrised types and two type constraints. e.g. fromIntegral)
       (Var inner, Just ([tv], [tvout]), _, [t1, t2, _, _], [e1], _, _) | not $ tv `eqType` tvout ->
-        let (tmpix1, stmts1, (t1', e1')) = exprToCExpr tmpix args tin (exprToCType t1) inports outports e1
+        let (tmpix1, stmts1, (t1', e1')) = exprToCExpr tmpix args tin (exprToCType t1) inports e1
          in resolveOp tmpix1 stmts1 [(t1', e1')] (exprToCType t2) $ getOccString inner
       (_, ty, _, _, _, _, _) -> error $ showPprUnsafe e <> " " <> showPprUnsafe ty
 
@@ -518,10 +518,10 @@ makeComb _ _ inports outports liports loports pt =
                   tout3 = exprToCType te3
                   tout4 = exprToCType te4
                   tys' = map portToC liports
-                  (cntr, init1, (_, ea1)) = exprToCExpr 0 argMap tys' tout1 inports outports e1
-                  (cntr1, init2, (_, ea2)) = exprToCExpr cntr argMap tys' tout2 inports outports e2
-                  (cntr2, init3, (_, ea3)) = exprToCExpr cntr1 argMap tys' tout3 inports outports e3
-                  (_, init4, (_, ea4)) = exprToCExpr cntr2 argMap tys' tout4 inports outports e4
+                  (cntr, init1, (_, ea1)) = exprToCExpr 0 argMap tys' tout1 inports e1
+                  (cntr1, init2, (_, ea2)) = exprToCExpr cntr argMap tys' tout2 inports e2
+                  (cntr2, init3, (_, ea3)) = exprToCExpr cntr1 argMap tys' tout3 inports e3
+                  (_, init4, (_, ea4)) = exprToCExpr cntr2 argMap tys' tout4 inports e4
                in ( FunArg
                   , argMap
                   , outArgs
@@ -539,9 +539,9 @@ makeComb _ _ inports outports liports loports pt =
                   tout2 = exprToCType te2
                   tout3 = exprToCType te3
                   tys' = map portToC liports
-                  (cntr, init1, (_, ea1)) = exprToCExpr 0 argMap tys' tout1 inports outports e1
-                  (cntr1, init2, (_, ea2)) = exprToCExpr cntr argMap tys' tout2 inports outports e2
-                  (_, init3, (_, ea3)) = exprToCExpr cntr1 argMap tys' tout3 inports outports e3
+                  (cntr, init1, (_, ea1)) = exprToCExpr 0 argMap tys' tout1 inports e1
+                  (cntr1, init2, (_, ea2)) = exprToCExpr cntr argMap tys' tout2 inports e2
+                  (_, init3, (_, ea3)) = exprToCExpr cntr1 argMap tys' tout3 inports e3
                in ( FunArg
                   , argMap
                   , outArgs
@@ -557,8 +557,8 @@ makeComb _ _ inports outports liports loports pt =
               let tout1 = exprToCType te1
                   tout2 = exprToCType te2
                   tys' = map portToC liports
-                  (cntr, init1, (_, ea1)) = exprToCExpr 0 argMap tys' tout1 inports outports e1
-                  (_, init2, (_, ea2)) = exprToCExpr cntr argMap tys' tout2 inports outports e2
+                  (cntr, init1, (_, ea1)) = exprToCExpr 0 argMap tys' tout1 inports e1
+                  (_, init2, (_, ea2)) = exprToCExpr cntr argMap tys' tout2 inports e2
                in ( FunArg
                   , argMap
                   , outArgs
@@ -570,7 +570,7 @@ makeComb _ _ inports outports liports loports pt =
                   )
         _ ->
           let tout1 = portToC $ last loports
-              (_, init1, (_, ea1)) = exprToCExpr 0 argMap (map portToC liports) tout1 inports outports expr
+              (_, init1, (_, ea1)) = exprToCExpr 0 argMap (map portToC liports) tout1 inports expr
            in ( FunArg
               , argMap
               , outArgs
@@ -587,7 +587,7 @@ bodyToStatement :: [CDecl] -> [CDecl] -> ProcessType -> (OutputLoc, [CArg], [CAr
 bodyToStatement inports outports = \case
   MoCProcess _ (Comb inputs outputs iports oports expr) -> makeComb inputs outputs inports outports iports oports expr
   MoCProcess _ (Delay port (Core expr)) ->
-        let (_, _, (_, delayExpr)) = exprToCExpr 0 [] [portToC port] (portToC port) inports outports expr
+        let (_, _, (_, delayExpr)) = exprToCExpr 0 [] [portToC port] (portToC port) inports expr
          in ( FunArg
             , map (\(t', i) -> (i, (t', CIR.EVar i))) inports
             , map (\(t', i) -> (i, (t', CIR.EVar i))) outports
@@ -609,7 +609,7 @@ bodyToStatement inports outports = \case
    func e =
     let (args, expr') = collectBinders e
         argMap = makeMap args inports
-        (_, stmts, (_, expr)) = exprToCExpr 0 argMap (map fst inports) (fst . head $ outports) inports outports expr'
+        (_, stmts, (_, expr)) = exprToCExpr 0 argMap (map fst inports) (fst . head $ outports) inports expr'
      in ( Return
         , argMap
         , []
