@@ -52,16 +52,19 @@ instance Pretty IdExt where
   pretty IReduce = pretty "skepu::Reduce"
   pretty Map = pretty "skepu::Map"
 
-type CType = CIR.Type (Id IdExt)
-type CExpression = CIR.Expression (Id IdExt)
-type CStatement = CIR.Statement (Id IdExt)
-type CProgram = CIR.Program (Id IdExt)
+type CType = CIR.Type CId
+type CExpression = CIR.Expression CId
+type CStatement = CIR.Statement CId
+type CProgram = CIR.Program CId
+type CId = Id IdExt
+type CDecl = (CType, CId)
+type CArg = (CId, (CType, CExpression))
 
 data CContext = CContext
   { from :: Id ()
   , ret :: CType
-  , inputs :: [(CType, Id IdExt)]
-  , outputs :: [(CType, Id IdExt)]
+  , inputs :: [CDecl]
+  , outputs :: [CDecl]
   , delayStorage :: S.Set (CType, Id IdExt, CExpression)
   , delay :: Bool
   , body :: CStatement
@@ -150,23 +153,23 @@ exprToCType = \case
   _ -> error "Not a type!"
 
 -- | Make a C type and Id pair from a GHC Core binder
-varToCDef :: Var -> (CType, Id IdExt)
+varToCDef :: Var -> CDecl
 varToCDef v =
   let ty = varToCType v
       name = Direct v
    in (ty, name)
 
-inputIds :: [Id IdExt]
+inputIds :: [CId]
 inputIds = map ((ExId Input <>) . Ix) [0 ..]
 inputArgs :: [CExpression]
 inputArgs = map CIR.EVar inputIds
-outputIds :: [Id IdExt]
+outputIds :: [CId]
 outputIds = map ((ExId Output <>) . Ix) [0 ..]
 outputArgs :: [CExpression]
 outputArgs = map CIR.EVar outputIds
 
 -- | Make a new temporary identifier
-mkTemp :: Int -> (Int, Id IdExt)
+mkTemp :: Int -> (Int, CId)
 mkTemp ix = (ix + 1, ExId Tmp <> Ix ix)
 
 data OutputLoc
@@ -174,7 +177,7 @@ data OutputLoc
   | Return
 
 -- Get the corresponding SkePU skeleton from the function name
-skelToSkePU :: String -> Maybe (OutputLoc, Id IdExt)
+skelToSkePU :: String -> Maybe (OutputLoc, CId)
 skelToSkePU = \case
   "reducei" -> Just (Return, ExId IReduce)
   "farm11" -> Just (FunArg, ExId Map <> (ExId $ Name "<1>"))
@@ -263,7 +266,7 @@ resolveOp _ _ _ _ = undefined
 {- | Wrap a C expression into a lambda, returning that as a statement and the
 expression to call it.
 -}
-exprToLambda :: Int -> OutputLoc -> [((Id IdExt), (CType, CExpression))] -> [Id IdExt] -> [CType] -> CType -> [(CType, Id IdExt)] -> [(CType, Id IdExt)] -> CoreExpr -> (Int, [CStatement], (CType, CExpression))
+exprToLambda :: Int -> OutputLoc -> [CArg] -> [CId] -> [CType] -> CType -> [CDecl] -> [CDecl] -> CoreExpr -> (Int, [CStatement], (CType, CExpression))
 exprToLambda tmpix outLoc args largs tin tout inports outports expr = case expr of
   -- A function passed as a value (with type constraints). Construct a lambda
   App (App (Var f) t1) t2
@@ -320,8 +323,8 @@ exprToLambda tmpix outLoc args largs tin tout inports outports expr = case expr 
      in (tmpix1, stmts1, (tout, expr2))
 
 -- | Apply a skeleton instance to its arguments
-skelAppToCExpr :: Int -> OutputLoc -> [((Id IdExt), (CType, CExpression))] -> [CStatement] -> [CType] -> CType -> [(CType, b2)] -> Id IdExt -> CExpression -> (Int, [CStatement], (CType, CExpression))
-skelAppToCExpr tmpix1 ret args stmts1 tin tout inports skel e1' =
+skelAppToCExpr :: Int -> OutputLoc -> [CArg] -> [CStatement] -> [CType] -> CType -> [CDecl] -> CId -> CExpression -> (Int, [CStatement], (CType, CExpression))
+skelAppToCExpr tmpix1 ret args stmts1 tin tout inports skel lam =
   let (tmpix2, outname) = mkTemp tmpix1
       (tmpix3, skelInstance) = mkTemp tmpix2
       inputs = zipWith3 derefTo tin (map fst inports) (map (snd . snd) args)
@@ -358,7 +361,7 @@ skelAppToCExpr tmpix1 ret args stmts1 tin tout inports skel e1' =
             Return -> inputs
       stmts =
         [ CIR.SVarDecl tout outname ini
-        , CIR.SVarDef CIR.TAuto skelInstance Nothing $ CIR.ECall skel [e1']
+        , CIR.SVarDef CIR.TAuto skelInstance Nothing $ CIR.ECall skel [lam]
         ]
           <> case ret of
             FunArg -> [CIR.SExpr call]
@@ -387,7 +390,7 @@ decomposeExpr = goVars []
     expr -> (expr, tys, argExprs, argVars)
 
 -- | Decompose expression and check for skeleton and type
-decomposeAndSkeleton :: Expr CoreBndr -> (Expr CoreBndr, Maybe ([Type], [Type]), Maybe (OutputLoc, Id IdExt), [Arg CoreBndr], [Expr CoreBndr], [Expr CoreBndr], [CoreBndr])
+decomposeAndSkeleton :: Expr CoreBndr -> (Expr CoreBndr, Maybe ([Type], [Type]), Maybe (OutputLoc, CId), [Arg CoreBndr], [Expr CoreBndr], [Expr CoreBndr], [CoreBndr])
 decomposeAndSkeleton e = case decomposeExpr e of
   (base@(Var v), tys, exprs, vars) ->
     (base, Just $ extractTypes [] . varType $ v, skelToSkePU . getOccString $ v, tys, exprs <> map Var vars, exprs, vars)
@@ -397,7 +400,7 @@ decomposeAndSkeleton e = case decomposeExpr e of
 {- | Traverse a GHC Core expression and transform it into a C expression (and
 possibly statements).
 -}
-exprToCExpr :: Int -> [((Id IdExt), (CType, CExpression))] -> [CType] -> CType -> [(CType, Id IdExt)] -> [(CType, Id IdExt)] -> CoreExpr -> (Int, [CStatement], (CType, CExpression))
+exprToCExpr :: Int -> [CArg] -> [CType] -> CType -> [CDecl] -> [CDecl] -> CoreExpr -> (Int, [CStatement], (CType, CExpression))
 exprToCExpr tmpix args tin tout inports outports expr = case expr of
   -- Literals
   App _ (Lit (LitNumber _ i)) -> (tmpix, [], (CIR.TLong, CIR.EInt $ fromIntegral i))
@@ -422,8 +425,8 @@ exprToCExpr tmpix args tin tout inports outports expr = case expr of
       (Var v, _, Just (ret, skel), tys, _, [fun, ini], input)
         | getOccString v == "reducei" ->
             let (tmpix1, stmts1, (_, eIni)) = exprToCExpr tmpix args tin tout inports outports ini
-                (tmpix2, stmts2, (_, e1)) = exprToLambda tmpix1 ret args (map Direct input) (map exprToCType . take (length tin) $ tys) tout inports outports fun
-                (tmpix3, stmts3, (t2, e2)) = skelAppToCExpr tmpix2 ret args (stmts1 <> stmts2) tin tout inports skel e1
+                (tmpix2, stmts2, (_, lam)) = exprToLambda tmpix1 ret args (map Direct input) (map exprToCType . take (length tin) $ tys) tout inports outports fun
+                (tmpix3, stmts3, (t2, e2)) = skelAppToCExpr tmpix2 ret args (stmts1 <> stmts2) tin tout inports skel lam
              in case e2 of
                   CIR.ECall skelInstance _ ->
                     let stmts4 = [CIR.SExpr $ CIR.ECallExpr (CIR.EMemberAccess (CIR.EVar skelInstance) (ExId $ Name "setStartValue")) [eIni]]
@@ -431,8 +434,8 @@ exprToCExpr tmpix args tin tout inports outports expr = case expr of
                   _ -> undefined -- This should not happen, skelApptToCExpr will always pass a ECall
                   -- All skeleton farm applications
       (_, _, Just (ret, skel), tys, _, [argExpr], argVars) ->
-        let (tmpix1, stmts1, (_, e1)) = exprToLambda tmpix ret args (map Direct argVars) (map exprToCType . take (length tin) $ tys) tout inports outports argExpr
-         in skelAppToCExpr tmpix1 ret args stmts1 tin tout inports skel e1
+        let (tmpix1, stmts1, (_, lam)) = exprToLambda tmpix ret args (map Direct argVars) (map exprToCType . take (length tin) $ tys) tout inports outports argExpr
+         in skelAppToCExpr tmpix1 ret args stmts1 tin tout inports skel lam
       -- Vector length (two parametrised types and one type constraint)
       (Var inner, Just ([tv], [tvout]), _, [_, _, _], [e1], _, _) | not $ tv `eqType` tvout ->
         let (tmpix1, stmts1, (t1', expr1)) = exprToCExpr tmpix args tin (exprToCType e1) inports outports e1
@@ -499,10 +502,10 @@ M in [1,4].
 -}
 makeComb ::
   Int -> Int ->
-  [(CType, Id IdExt)] -> [(CType, Id IdExt)] ->
+  [CDecl] -> [CDecl] ->
   [Port] -> [Port] ->
   ProcessType ->
-  (OutputLoc, [(Id IdExt, (CType, CIR.Expression (Id IdExt)))], CIR.Statement (Id IdExt))
+  (OutputLoc, [CArg], CStatement)
 makeComb _ _ inports outports liports loports pt =
   -- TODO: should split the input args and outputs
   let (args, expr) = collectBinders . coreFromProcType $ pt
@@ -573,7 +576,7 @@ makeComb _ _ inports outports liports loports pt =
 {- | Here all the process constructors are recognised and either passed to a
 helper or processed dierectly
 -}
-bodyToStatement :: [(CType, Id IdExt)] -> [(CType, Id IdExt)] -> ProcessType -> (OutputLoc, [((Id IdExt), (CType, CExpression))], CStatement)
+bodyToStatement :: [CDecl] -> [CDecl] -> ProcessType -> (OutputLoc, [CArg], CStatement)
 bodyToStatement inports outports = \case
   MoCProcess _ (Comb inputs outputs iports oports expr) -> makeComb inputs outputs inports outports iports oports expr
   MoCProcess _ (Delay port (Core expr)) ->
@@ -611,7 +614,7 @@ removePoint = \case
   CIR.TPointer t -> t
   t -> t
 
-vertexToExpr :: (Foldable t) => t (Id IdExt) -> (Vertex a, CContext) -> CExpression
+vertexToExpr :: (Foldable t) => t CId -> (Vertex a, CContext) -> CExpression
 vertexToExpr pointers (Vertex{id = _, ..}, CContext{delayStorage}) = case process of
   Right _ -> undefined
   Left v -> CIR.ECall (IEmpty <$ v) $ map ioToExpr (map ((IEmpty <$) . fst) inputs) <> map ioToExpr (map ((IEmpty <$) . fst) outputs) <> delayParams
