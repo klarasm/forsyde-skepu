@@ -506,10 +506,7 @@ assignOutputs fun (cntr, stmts) ((tout, expr), outport@(ty, ident)) = (cntr1, st
       <> init1
       <> [CIR.SAssign (derefTo CIR.TVoid ty $ CIR.EVar ident) (snd tyE1)]
 
-{- | Create processes using combNM. Note that only the number of tupled outputs
-will change how it is processed, meaning this could accept any combNM where
-M in [1,4].
--}
+-- | Create combNM process
 makeComb ::
   Int -> Int ->
   [CDecl] -> [CDecl] ->
@@ -522,30 +519,12 @@ makeComb _ _ inports outports liports loports pt =
       outArgs = makeMap [] outports
       tys' = map portToC liports
       assign tys cntr tout a e = exprToCExpr cntr argMap tys tout inports a e
-   in case expr of
-        App (App (App (App (App (App (App (App (Var v') te1) te2) te3) te4) e1) e2) e3) e4
-          | getOccString v' == "(,,,)" ->
-              let tout1 = exprToCType te1
-                  tout2 = exprToCType te2
-                  tout3 = exprToCType te3
-                  tout4 = exprToCType te4
-                  outParams = zip [(tout1, e1), (tout2, e2), (tout3, e3), (tout4, e4)] outports
-                  (_, stmts) = foldl' (assignOutputs $ assign tys') (0, []) outParams
-           in (FunArg, argMap, outArgs, [], CIR.SScope stmts)
-        App (App (App (App (App (App (Var v') te1) te2) te3) e1) e2) e3
-          | getOccString v' == "(,,)" ->
-              let tout1 = exprToCType te1
-                  tout2 = exprToCType te2
-                  tout3 = exprToCType te3
-                  outParams = zip [(tout1, e1), (tout2, e2), (tout3, e3)] outports
-                  (_, stmts) = foldl' (assignOutputs $ assign tys') (0, []) outParams
-           in (FunArg, argMap, outArgs, [], CIR.SScope stmts)
-        App (App (App (App (Var v') te1) te2) e1) e2
-          | getOccString v' == "(,)" ->
-              let tout1 = exprToCType te1
-                  tout2 = exprToCType te2
-                  outParams = zip [(tout1, e1), (tout2, e2)] outports
-                  (_, stmts) = foldl' (assignOutputs $ assign tys') (0, []) outParams
+   in case decomposeExpr expr of
+        (Var v, touts, argExprs, [])
+          | (isTupleConstructor . getResType . varType $ v) ->
+          let tyE = zipWith (\ty e -> (exprToCType ty, e)) touts argExprs
+              outParams = zip tyE outports
+              (_, stmts) = foldl' (assignOutputs $ assign tys') (0, []) outParams
            in (FunArg, argMap, outArgs, [], CIR.SScope stmts)
         _ ->
           let tout1 = portToC $ last loports

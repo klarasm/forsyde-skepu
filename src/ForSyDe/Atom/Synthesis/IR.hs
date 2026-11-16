@@ -29,6 +29,8 @@ module ForSyDe.Atom.Synthesis.IR (
   procsFromId,
   vertexProcs,
   extractTypes,
+  getResType,
+  isTupleConstructor,
   coreFromProcType,
 )
 where
@@ -434,6 +436,24 @@ extractTypes acc = \case
   extractConstructor resacc = \case
     TyConApp v types | isTupleTyCon v -> reverse resacc <> types
     t -> reverse (t : resacc)
+
+-- | Check if the type is a tuple constructor
+isTupleConstructor :: Type -> Bool
+isTupleConstructor = \case
+  TyConApp tc _ -> isTupleTyCon tc
+  _ -> False
+
+-- | Get the 'return' of a function type
+getResType :: Type -> Type
+getResType = \case
+  ForAllTy _ ty -> getResType ty
+  FunTy{ft_af = FTF_C_T, ft_res = res} ->
+    getResType res
+  FunTy{ft_af = FTF_C_C, ft_res = res} ->
+    getResType res
+  FunTy{ft_arg = _, ft_res = res} ->
+    getResType res
+  t -> t
 
 -- | Strip Apps matching with the binders from stripLams
 stripApps :: ([CoreBndr], CoreExpr) -> Maybe CoreExpr
