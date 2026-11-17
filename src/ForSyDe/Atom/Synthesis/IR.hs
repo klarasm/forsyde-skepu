@@ -32,13 +32,14 @@ module ForSyDe.Atom.Synthesis.IR (
   getResType,
   isTupleConstructor,
   coreFromProcType,
+  extractProcessType,
 )
 where
 
 import Control.Monad
 import Data.Data (Data, Typeable)
 import Data.List (sort)
-import Data.Maybe (catMaybes, mapMaybe)
+import Data.Maybe (catMaybes, listToMaybe, mapMaybe)
 import qualified Data.Set as S
 import GHC.Core
 import GHC.Core.DataCon
@@ -154,21 +155,21 @@ instance Show ProcessConstructor where
   show = show . pretty
 
 data SkeletonPattern
-  = Farm Int Int [Port] [Port] ProcessType
+  = Farm Int Int [Port] [Port] ProcessType [ProcessType]
   -- ^ A farmNM has a parametrised type for each input and output
-  | Reduce Port ProcessType
+  | Reduce Port ProcessType (Maybe ProcessType)
   -- ^ A reduce has a single parametrised type for both the input and output
-  | ReduceI Port ProcessType ProcessType
+  | ReduceI Port ProcessType ProcessType (Maybe ProcessType)
   -- ^ A reducei has a single parametrised type for both the input and output
   deriving (Data)
 
 instance Pretty SkeletonPattern where
-  pretty (Farm inputs outputs inports outports expr) =
-    pretty "farm" <> pretty inputs <> pretty outputs <> tupled [pretty inports, pretty outports, pretty expr]
-  pretty (Reduce port expr) =
-    pretty "reduce" <> tupled [pretty port, pretty expr]
-  pretty (ReduceI port ini expr) =
-    pretty "reducei" <> tupled [pretty port, pretty ini, pretty expr]
+  pretty (Farm inputs outputs inports outports expr args) =
+    pretty "farm" <> pretty inputs <> pretty outputs <> tupled [pretty inports, pretty outports, pretty expr, pretty args]
+  pretty (Reduce port expr args) =
+    pretty "reduce" <> tupled [pretty port, pretty expr, pretty args]
+  pretty (ReduceI port expr ini args) =
+    pretty "reducei" <> tupled [pretty port, pretty expr, pretty ini, pretty args]
 
 instance Show SkeletonPattern where
   show = show . pretty
@@ -743,21 +744,21 @@ extractProcessType expr = case collectArgs expr of
   (Var v, args) | startsWith combName (getOccString v) ->
     let (_, inout) = splitAt (length combName) (getOccString v)
         (inputs, outputs) = splitAt 1 inout
-    in  multInpOuts (\ni no ti to f -> MoCProcess expr $ Comb ni no ti to f) inputs outputs args
+    in  multInpOuts (\ni no ti to f _ -> MoCProcess expr $ Comb ni no ti to f) inputs outputs args
   (Var v, args) | startsWith farmName (getOccString v) ->
     let (_, inout) = splitAt (length combName) (getOccString v)
         (inputs, outputs) = splitAt 1 inout
-    in  multInpOuts (\ni no ti to f -> Skeleton expr $ Farm ni no ti to f) inputs outputs args
+    in  multInpOuts (\ni no ti to f app -> Skeleton expr $ Farm ni no ti to f app) inputs outputs args
   (Var v, args) | startsWith mooreName (getOccString v) ->
     let (_, inout) = splitAt (length mooreName) (getOccString v)
         (inputs, outputs) = splitAt 1 inout
     in  fsm (\ni no ts ti to ns od ini -> MoCProcess expr $ Moore ni no ts ti to ns od ini) inputs outputs args
   (Var v, [Type t, appliedExpr]) | getOccString v == delayName ->
     (MoCProcess expr $ Delay (makePort t) (Core appliedExpr))
-  (Var v, [Type t, ini, appliedExpr]) | getOccString v == reduceIName ->
-    Skeleton expr $ ReduceI (makePort t) (extractProcessType ini) (extractProcessType appliedExpr)
-  (Var v, [Type t, appliedExpr]) | getOccString v == reduceName ->
-    Skeleton expr $ Reduce (makePort t) (extractProcessType appliedExpr)
+  (Var v, (Type t:ini:appliedExpr:app)) | getOccString v == reduceIName ->
+    Skeleton expr $ ReduceI (makePort t) (extractProcessType ini) (extractProcessType appliedExpr) (extractProcessType <$> listToMaybe app)
+  (Var v, (Type t:appliedExpr:app)) | getOccString v == reduceName ->
+    Skeleton expr $ Reduce (makePort t) (extractProcessType appliedExpr) (extractProcessType <$> listToMaybe app)
   (Var v, [Type tmid, Type tout, Type tin, fleft, fright]) | getOccString v == "." ->
     Pipe expr (makePort tin) (makePort tmid) (makePort tout) (extractProcessType fleft) (extractProcessType fright)
   _ -> Core expr
@@ -778,14 +779,14 @@ extractProcessType expr = case collectArgs expr of
               inTys <- traverse getType inArgs
               outTys <- traverse getType outArgs
               case expr' of
-                [ns, od, ini] -> pure $ con iinputs ioutputs (makePort stateTy) (map makePort inTys) (map makePort outTys)
+                (ns:od:ini:_app) -> pure $ con iinputs ioutputs (makePort stateTy) (map makePort inTys) (map makePort outTys)
                   (extractProcessType ns) (extractProcessType od) (extractProcessType ini)
                 _ -> fail $ "Argument count mismatch: " <> showPprUnsafe expr'
         in case out of
           Just f -> f
           Nothing -> Core expr
       _ -> Core expr
-    multInpOuts :: (Int -> Int -> [Port] -> [Port] -> ProcessType -> ProcessType) -> String -> String -> [CoreExpr] -> ProcessType
+    multInpOuts :: (Int -> Int -> [Port] -> [Port] -> ProcessType -> [ProcessType] -> ProcessType) -> String -> String -> [CoreExpr] -> ProcessType
     multInpOuts con inputs outputs args =
       case (reads inputs, reads outputs) of
       ([(iinputs, "")], [(ioutputs, "")]) ->
@@ -796,8 +797,8 @@ extractProcessType expr = case collectArgs expr of
               inTys <- traverse getType inArgs
               outTys <- traverse getType outArgs
               case expr' of
-                [applied] -> pure $ con iinputs ioutputs
-                  (map makePort inTys) (map makePort outTys) (extractProcessType applied)
+                (applied:app) -> pure $ con iinputs ioutputs
+                  (map makePort inTys) (map makePort outTys) (extractProcessType applied) (map extractProcessType app)
                 _ -> fail "Argument count mismatch"
         in case out of
           Just f -> f

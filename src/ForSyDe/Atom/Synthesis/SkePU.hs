@@ -247,59 +247,23 @@ resolveOp _ _ _ _ = undefined
 {- | Wrap a C expression into a lambda, returning that as a statement and the
 expression to call it.
 -}
-exprToLambda :: Int -> [CArg] -> [CType] -> CType -> CoreExpr -> (Int, [CStatement], (CType, CExpression))
-exprToLambda tmpix args tin tout expr = case expr of
-  -- A function passed as a value (with type constraints). Construct a lambda
-  App (App (Var f) t1) t2
-    | typeOrConstraint t1 && typeOrConstraint t2 ->
-        case makePorts . extractTypes [] . varType $ f of
-          -- A binary function
-          (_ : _ : [], _ : []) ->
-            let in1 = ExId Input <> Ix 0
-                t1' = exprToCType t1
-                in2 = ExId Input <> Ix 1
-                t2' = exprToCType t2
-                (tmpix', stmts, (_, expr')) = resolveOp tmpix [] [(t1', CIR.EVar in1), (t2', CIR.EVar in2)] tout (getOccString f)
-                expr'' = CIR.ELambda [] [(t1', in1), (t2', in2)] $ CIR.SScope [CIR.SReturn . Just $ expr']
-             in (tmpix', stmts, (tout, expr''))
-          -- A unary function
-          (_ : [], _ : []) ->
-            let in1 = ExId Input <> Ix 0
-                t1' = exprToCType t1
-                (tmpix', stmts, (_, expr')) = resolveOp tmpix [] [(t1', CIR.EVar in1)] tout (getOccString f)
-                expr'' = CIR.ELambda [] [(t1', in1)] $ CIR.SScope [CIR.SReturn . Just $ expr']
-             in (tmpix', stmts, (tout, expr''))
-          _ -> undefined
-  App (App (App (Var f) t1) t2) v1@(Var v)
-    | typeOrConstraint t1 && typeOrConstraint t2 && (not $ typeOrConstraint v1) ->
-        case (makePorts . extractTypes [] . varType $ f, lookup (Direct v) args) of
-          -- A partially applied binary function, construct a lambda. Note that
-          -- SkePU does not use variable capture, but instead passes it as a
-          -- scalar.
-          ((_ : _ : [], _ : []), Just (_, _)) ->
-            let in1 = ExId Input <> Ix 0
-                t1' = exprToCType t1
-                in2 = ExId Input <> Ix 1
-                t2' = exprToCType t2
-                (tmpix', stmts, (_, expr')) = resolveOp tmpix [] [(t1', CIR.EVar in1), (t2', CIR.EVar in2)] tout (getOccString f)
-                expr'' = CIR.ELambda [] [(t1', in1), (t2', in2)] $ CIR.SScope [CIR.SReturn . Just $ expr']
-             in (tmpix', stmts, (tout, expr''))
-          _ -> undefined
-  e@(Lam _ _) ->
+exprToLambda :: Int -> [CArg] -> [CType] -> CType -> [CDecl] -> CoreExpr -> (Int, [CStatement], (CType, CExpression))
+exprToLambda tmpix args tin tout inports e =
     let (b1, e1) = collectBinders e
-        args' = map varToArgMap b1
-        varToArgMap v = (Direct v, (varToCType v, CIR.EVar (Direct v)))
-     in exprToLambda tmpix (args' <> args) tin tout e1
-  e ->
-    let args' = map (\(i1, (t, i2)) -> (i1, (removePoint t, i2))) args
-        (tmpix1, stmts1, (_, expr1)) = exprToCExpr tmpix args' tin tout (zip tin inputIds) Nothing e
+        largsDef = map (\v -> (varToCType v, Direct v :: CId)) b1
+        largs = makeMap [] largsDef
+        args' = map (\(i1, (t, i2)) -> (i1, (removePoint t, i2))) args
+        implicit = zipWith (\t i -> (t, i <> Ix tmpix)) (drop (length largs) tin) inputIds
+        implicitArgs = makeMap [] implicit
+        (tmpix1, stmts1, (_, expr1)) = exprToCExpr (tmpix+1) (largs <> implicitArgs <> args') tin tout implicit Nothing e1
         inExpr = CIR.getVars expr1
-        explicit = map (\(i, _) -> i) . filter (\(i, _) -> elem i inExpr) $ args'
-        notInArgs = filter (not . flip elem explicit) . sort $ inExpr
-        -- Implicit arguments, i.e. eta-reduced ones
-        implicit = take (length tin - length explicit) $ notInArgs
-        -- Explicit arguments specified by Lams
-        inputs = zip tin $ implicit <> explicit
+        explicitIds = map (\(i, _) -> i) . filter (\(i, _) -> elem i inExpr) $ largs
+        notInArgs = filter (not . flip elem explicitIds) . sort $ inExpr
+        captured =
+          filter (\(_, i) -> i `elem` notInArgs)
+            . map (\(t, i) -> (removePoint t, i))
+            $ drop (length largs + length implicit) inports
+        inputs = largsDef <> implicit <> captured
         expr2 = CIR.ELambda [] inputs $ CIR.SScope [CIR.SReturn $ Just expr1]
      in (tmpix1, stmts1, (tout, expr2))
 
@@ -407,55 +371,57 @@ exprToCExpr tmpix args tin tout inports assign = \case
             then (tmpix, [], (portToC . head $ outputs, CIR.ECall (Direct v) inArgs))
             else error "user functions with multiple output is currently unsupported"
   e ->
-    case decomposeAndSkeleton e of
+    case (decomposeAndSkeleton e, extractProcessType e) of
       -- Reduce(i)
-      (Var v, _, Just (ret, skel), tys, _, [fun, ini], _)
-        | getOccString v == "reducei" ->
-            let (tmpix1, stmts1, (_, eIni)) = exprToCExpr tmpix args tin tout inports Nothing ini
-                (tmpix2, stmts2, (_, lam)) = exprToLambda tmpix1 args (map exprToCType . take (length tin) $ tys) tout fun
-                (tmpix3, stmts3, (t2, e2)) = skelAppToCExpr tmpix2 ret args (stmts1 <> stmts2) tin tout inports skel lam Nothing
+      (_, Skeleton _ (ReduceI port fun ini _)) ->
+            let (tmpix1, stmts1, (_, eIni)) = exprToCExpr tmpix args [portToC port] tout inports Nothing (coreFromProcType ini)
+                (tmpix2, stmts2, (_, lam)) = exprToLambda tmpix1 args [portToC port, portToC port] (portToC port) inports (coreFromProcType fun)
+                (tmpix3, stmts3, (t2, e2)) = skelAppToCExpr tmpix2 Return args (stmts1 <> stmts2) tin tout inports (ExId IReduce) lam Nothing
              in case e2 of
                   CIR.ECall skelInstance _ ->
                     let stmts4 = [CIR.SExpr $ CIR.ECallExpr (CIR.EMemberAccess (CIR.EVar skelInstance) (ExId $ Name "setStartValue")) [eIni]]
                      in (tmpix3, stmts1 <> stmts2 <> stmts3 <> stmts4, (t2, e2))
                   _ -> undefined -- This should not happen, skelApptToCExpr will always pass a ECall
       -- All skeleton farm applications
-      (_, _, Just (ret, skel), tys, _, [argExpr], _) ->
-        let (tmpix1, stmts1, (_, lam)) = exprToLambda tmpix args (map exprToCType . take (length tin) $ tys) tout argExpr
-         in skelAppToCExpr tmpix1 ret args stmts1 tin tout inports skel lam assign
+      (_, Skeleton _ (Farm i _ ipo _ (Core argExpr) _)) ->
+        let (tmpix1, stmts1, (_, lam)) = exprToLambda tmpix args (map portToC ipo) tout inports argExpr
+         in skelAppToCExpr tmpix1 FunArg args stmts1 tin tout inports (ExId Map <> ExId (Name $ "<" <> show i <> ">")) lam assign
       -- Vector length (two parametrised types and one type constraint)
-      (Var inner, Just ([tv], [tvout]), _, [_, _, _], [e1], _, _) | not $ tv `eqType` tvout ->
+      ((Var inner, Just ([tv], [tvout]), _, [_, _, _], [e1], _, _), _) | not $ tv `eqType` tvout ->
         let (tmpix1, stmts1, (t1', expr1)) = exprToCExpr tmpix args tin (exprToCType e1) inports Nothing e1
          in resolveOp tmpix1 stmts1 [(t1', expr1)] tout $ getOccString inner
       -- A fully applied binary function (one parametrised type and one type constraint)
-      (Var inner, Just ([tv1, tv2], [tvout]), _, [t1, _], [e1, e2], _, _)  | tv1 `eqType` tvout && tv2 `eqType` tvout ->
+      ((Var inner, Just ([tv1, tv2], [tvout]), _, [t1, _], [e1, e2], _, _), _)  | tv1 `eqType` tvout && tv2 `eqType` tvout ->
         let (tmpix1, stmts1, (t1', expr1)) = exprToCExpr tmpix args tin (exprToCType t1) inports Nothing e1
             (tmpix2, stmts2, (t2', expr2)) = exprToCExpr tmpix1 args tin (exprToCType t1) inports Nothing e2
          in resolveOp tmpix2 (stmts1 <> stmts2) [(t1', expr1), (t2', expr2)] tout $ getOccString inner
       -- A partially applied binary function (one parametrised type and one type constraint)
-      (Var inner, Just ([tv1, tv2], [tvout]), _, [t1, _], [e1], _, _) | tv1 `eqType` tvout && tv2 `eqType` tvout ->
+      ((Var inner, Just ([tv1, tv2], [tvout]), _, [t1, _], [e1], _, _), _) | tv1 `eqType` tvout && tv2 `eqType` tvout ->
         let (tmpix1, stmts1, (t1', expr1)) = exprToCExpr tmpix args tin (exprToCType t1) inports Nothing e1
             v1 = derefTo (exprToCType t1) (fst . head $ inports) $ CIR.EVar $ ExId Input <> Ix 0
          in resolveOp tmpix1 stmts1 [(t1', expr1), (exprToCType t1, v1)] tout $ getOccString inner
       -- An unapplied binary function (one parametrised type and one type constraint)
-      (Var inner, Just ([tv1, tv2], [tvout]), _, [_, _], [], [], []) | tv1 `eqType` tvout && tv2 `eqType` tvout->
+      ((Var inner, Just ([tv1, tv2], [tvout]), _, [_, _], [], [], []), _) | tv1 `eqType` tvout && tv2 `eqType` tvout->
         resolveOp 0 [] (take 2 . map snd $ args) tout $ getOccString inner
       -- A fully applied unary function (one parametrised type)
-      (Var inner, Just ([tv], [tvout]), _, [t1], [e1], _, _) | tv `eqType` tvout ->
+      ((Var inner, Just ([tv], [tvout]), _, [t1], [e1], _, _), _) | tv `eqType` tvout ->
         let (tmpix1, stmts1, (t1', expr1)) = exprToCExpr tmpix args tin (exprToCType t1) inports Nothing e1
          in resolveOp tmpix1 stmts1 [(t1', expr1)] tout $ getOccString inner
       -- A fully applied unary function (one parametrised type)
-      (Var inner, Just ([tv], [tvout]), _, [t1, _], [e1], _, _) | tv `eqType` tvout ->
+      ((Var inner, Just ([tv], [tvout]), _, [t1, _], [e1], _, _), _) | tv `eqType` tvout ->
         let (tmpix1, stmts1, (t1', expr1)) = exprToCExpr tmpix args tin (exprToCType t1) inports Nothing e1
          in resolveOp tmpix1 stmts1 [(t1', expr1)] tout $ getOccString inner
       -- An unapplied unary function (one parametrised type)
-      (Var inner, Just ([tv], [tvout]), _, [_], [], [], []) | tv `eqType` tvout ->
+      ((Var inner, Just ([tv], [tvout]), _, [_], [], [], []), _) | tv `eqType` tvout ->
         resolveOp 0 [] (take 1 . map snd $ args) tout $ getOccString inner
+      -- An unapplied unary function (one parametrised type, one constraint)
+      ((Var inner, Just ([tv], [tvout]), _, [t1, _], [], [], []), _) | tv `eqType` tvout ->
+        resolveOp 0 [] (take 1 . map snd $ args) (exprToCType t1) $ getOccString inner
       -- A fully applied unary function (two parametrised types and two type constraints. e.g. fromIntegral)
-      (Var inner, Just ([tv], [tvout]), _, [t1, t2, _, _], [e1], _, _) | not $ tv `eqType` tvout ->
+      ((Var inner, Just ([tv], [tvout]), _, [t1, t2, _, _], [e1], _, _), _) | not $ tv `eqType` tvout ->
         let (tmpix1, stmts1, (t1', e1')) = exprToCExpr tmpix args tin (exprToCType t1) inports Nothing e1
          in resolveOp tmpix1 stmts1 [(t1', e1')] (exprToCType t2) $ getOccString inner
-      (_, ty, _, _, _, _, _) -> error $ showPprUnsafe e <> " " <> showPprUnsafe ty
+      ((_, ty, _, _, _, _, _), _) -> error $ showPprUnsafe e <> " " <> showPprUnsafe ty
 
 -- | Compute the difference in pointer type
 needDeref :: (Num t) => t -> (CIR.Type a1, CIR.Type a2) -> t
