@@ -485,8 +485,9 @@ makeProcess parent procs = \case
   Right (NonRec bind expr') ->
     -- A process needs at least an output. The case with no inputs is technically
     -- a signal, but this can be useful for e.g. generators.
-    if length outports /= 0
-      then
+    if null outports
+      then Nothing
+      else
         Just
           Process
             { binder = Direct bind
@@ -499,7 +500,6 @@ makeProcess parent procs = \case
             , procType = extractProcessType body
             , mocData = Nothing
             }
-      else Nothing
    where
     body = stripLamApps expr'
     subsystem = translateExpr (Direct bind) procs body
@@ -592,9 +592,9 @@ translateExpr parent procs expr' = out
   schedulable = not selfEdges && (all (\(G.Node _ forest) -> forest == []) . G.scc $ graph)
   schedule = if schedulable then pure $ G.topSort graph else Nothing
   out =
-    if length vertices /= 0
-      then pure $ System { graph = Just graph , .. }
-      else Nothing
+    if null vertices
+      then Nothing
+      else pure $ System { graph = Just graph , .. }
 
 -- | Find processes matching the supplied Id
 procsFromId :: Id a -> [Process b] -> [Process b]
@@ -727,7 +727,7 @@ resolveTuples apps (proc, inputs, output, _) = Just (proc, inputs, outputs)
       )
       apps
   outputs' = map snd . sort . mapMaybe getPos $ splits
-  outputs = if length outputs' /= 0 then outputs' else [output]
+  outputs = if null outputs' then [output] else outputs'
   getPos :: (CoreExpr, Var) -> Maybe (Int, Var)
   getPos (expr, var) = case expr of
     (Case _ _ _ ((Alt _ args (Var out)) : _)) ->
