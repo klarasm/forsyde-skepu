@@ -634,11 +634,6 @@ getProcesses parent acc = \case
   Case (Var _) _ _ (Alt (DataAlt dc) _ e : _)
     | isTupleDataCon dc ->
         getProcesses parent acc e
-  -- Function composition
-  App (App (App (App (App (Var v) _) _) _) e1) e2
-    | "." == (getOccString . getName) v ->
-        let procs = getProcesses parent acc e1
-         in getProcesses parent procs e2
   _ -> acc
 
 {- | Get the applied signals of a subsystem
