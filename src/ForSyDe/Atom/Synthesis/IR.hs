@@ -560,7 +560,7 @@ translateExpr parent procs expr' = out
  where
   (_, inputs', expr) = collectTyAndValBinders expr'
   inputs = filter (not . typeOrConstraint . Var) inputs'
-  (binds, inputMap, sigs, outputs) = getSignals inputs [] [] expr
+  (binds, sigs, outputs) = getSignals inputs [] expr
   apps' = map (getApplication binds) sigs
   apps = map appToIdTypes . mapMaybe (resolveTuples apps') $ apps'
   varToIdType v = (Direct v, makePort . varType $ v)
@@ -570,12 +570,8 @@ translateExpr parent procs expr' = out
     filter (\Process{binder} -> not $ elem binder (Direct <$> binds)) $
       getProcesses parent [] expr
   (ixs, realVertices') = unzip $ zipWith (\ix -> makeVertexFromApps (() <$ parent <> Ix ix) (procs <> processes) ix) [0..] apps
-  realVertices = catMaybes . join $ realVertices'
+  vertices = catMaybes . join $ realVertices'
   nextix = case ixs of [] -> 0; xs -> maximum xs
-  tupleVertices =
-    catMaybes . zipWith (makeVertex parent (procs <> processes)) [nextix ..] $
-      map (appToIdTypes . \(v, m) -> (Var v, [v], m)) inputMap
-  vertices = realVertices <> tupleVertices
   edges = makeEdge <$> vertices <*> vertices >>= id
   dependencies =
     mapMaybe
@@ -650,30 +646,29 @@ These will later be used to derive vertices and edges
 -}
 getSignals ::
   [CoreBndr] ->
-  [(CoreBndr, [CoreBndr])] ->
   [(CoreBndr, CoreExpr)] ->
   CoreExpr ->
-  ([CoreBndr], [(CoreBndr, [CoreBndr])], [(CoreBndr, CoreExpr)], [CoreBndr])
-getSignals bindacc inputAcc acc = \case
+  ([CoreBndr], [(CoreBndr, CoreExpr)], [CoreBndr])
+getSignals bindacc acc = \case
   -- A signal should be fully applied, i.e. it should not have any input argument
   Let (NonRec b e) inExpr
     | isSignal (b, e) ->
-        getSignals (b : bindacc) inputAcc ((b, e) : acc) inExpr
+        getSignals (b : bindacc) ((b, e) : acc) inExpr
   -- Likely a process, handled separately
   Let (NonRec _ _) inExpr
     | otherwise ->
-        getSignals bindacc inputAcc acc inExpr
+        getSignals bindacc acc inExpr
   -- A Rec binding should not contain any process since they are supposed to be
   -- self-contained. Therefore filter binds with inputs.
   Let (Rec sigs) inExpr ->
     let sigs' = filter isSignal sigs
         b = map fst sigs'
-     in getSignals (b <> bindacc) inputAcc (sigs' <> acc) inExpr
+     in getSignals (b <> bindacc) (sigs' <> acc) inExpr
   -- Add any top-level deconstructed input tuple mapping
   Case (Var v) _ _ (Alt (DataAlt dc) b e : _)
     | elem v bindacc && isTupleDataCon dc ->
-        getSignals (b <> bindacc) ((v, b) : inputAcc) acc e
-  Var v -> (bindacc, inputAcc, acc, [v])
+        getSignals (b <> bindacc) acc e
+  Var v -> (bindacc, acc, [v])
   -- May be a tuple construction
   e ->
     let (e', args) = collectArgs e
@@ -688,8 +683,8 @@ getSignals bindacc inputAcc acc = \case
           -- Is this actually a tuple constructor?
           Var i
             | (> 1) . length . snd . extractTypes [] $ varType i ->
-                (bindacc, inputAcc, acc, argvars)
-          _ -> (bindacc, inputAcc, acc, [])
+                (bindacc, acc, argvars)
+          _ -> (bindacc, acc, [])
  where
   isSignal = (0 ==) . length . fst . extractTypes [] . varType . fst
 
