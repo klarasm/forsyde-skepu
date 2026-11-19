@@ -53,6 +53,7 @@ data UnaryOperator
   | LogicalNot
   | PostIncrement
   | PostDecrement
+  | BitwiseNot
   deriving (Data, Typeable, Eq, Ord)
 instance Pretty UnaryOperator where
   pretty = \case
@@ -60,6 +61,7 @@ instance Pretty UnaryOperator where
     LogicalNot -> pretty "!"
     PostIncrement -> pretty "++"
     PostDecrement -> pretty "--"
+    BitwiseNot -> pretty "~"
 instance Show UnaryOperator where
   show = show . pretty
 
@@ -85,7 +87,6 @@ data BinaryOperator
   | BitwiseAnd
   | BitwiseXor
   | BitwiseOr
-  | BitwiseNot
   deriving (Data, Typeable, Eq, Ord)
 instance Pretty BinaryOperator where
   pretty = \case
@@ -110,7 +111,6 @@ instance Pretty BinaryOperator where
     BitwiseAnd -> pretty "&"
     BitwiseXor -> pretty "^"
     BitwiseOr -> pretty "|"
-    BitwiseNot -> pretty "~"
 
 instance Show BinaryOperator where
   show = show . pretty
