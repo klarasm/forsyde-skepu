@@ -731,7 +731,7 @@ extractProcessType expr = case collectArgs expr of
         (inputs, outputs) = splitAt 1 inout
     in  multInpOuts (\ni no ti to f _ -> MoCProcess expr $ Comb ni no ti to f) inputs outputs args
   (Var v, args) | startsWith farmName (getOccString v) ->
-    let (_, inout) = splitAt (length combName) (getOccString v)
+    let (_, inout) = splitAt (length farmName) (getOccString v)
         (inputs, outputs) = splitAt 1 inout
     in  multInpOuts (\ni no ti to f app -> Skeleton expr $ Farm ni no ti to f app) inputs outputs args
   (Var v, args) | startsWith mooreName (getOccString v) ->
