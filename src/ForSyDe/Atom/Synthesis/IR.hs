@@ -915,5 +915,5 @@ getUsedAndLiftNested reachable p@Process{..} = S.singleton p{subsystem = subsys}
 
 class Synthesizable a where
   -- may need to resolve a previously unresolved process as dependency
-  synthesize :: [Process a] -> Process a -> ([a], [a]) -> ([a], [a])
+  synthesize :: [Process ()] -> Process () -> ([a], [a]) -> ([a], [a])
   compose :: ([a], [a]) -> a
