@@ -491,14 +491,12 @@ makeProcess parent procs = \case
         Just
           Process
             { binder = Direct bind
-            , inports
-            , outports
-            , subsystem
             , appliedInternal = case subsystem of
                 Just _ -> mempty
                 Nothing -> S.map Direct . getInternal procs mempty $ body
             , procType = extractProcessType body
             , mocData = Nothing
+            , ..
             }
    where
     body = stripLamApps expr'
@@ -508,14 +506,12 @@ makeProcess parent procs = \case
     Just
       Process
         { binder = () <$ parent <> Ix ix
-        , inports
-        , outports
-        , subsystem
         , appliedInternal = case subsystem of
             Just _ -> mempty
             Nothing -> S.map Direct . getInternal procs mempty $ body
         , procType = extractProcessType body
         , mocData = Nothing
+        , ..
         }
    where
     (inports, outports) = (snd <$> inputs, snd <$> outputs)
@@ -809,11 +805,10 @@ makeVertex parent procs ix = \case
       Vertex
         { id = ix
         , process = Left (Direct bind)
-        , inputs
-        , outputs
         , delay = case filter isDelayProcess . procsFromId (Direct bind) $ procs of
             [] -> False
             _ -> True
+        , ..
         }
   -- An application of an inline process definition
   (expr, inputs, outputs) -> do
@@ -822,10 +817,8 @@ makeVertex parent procs ix = \case
     pure $
       Vertex
         { id = ix
-        , process
-        , inputs
-        , outputs
         , delay = isDelayProcess proc
+        , ..
         }
 
 -- | Make vertex from a core expression, and list of input and output signals
