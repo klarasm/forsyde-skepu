@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 4.0)
 
+set(CMAKE_CXX_STANDARD 11)
 project(forsyde-skepu-tests LANGUAGES CXX)
 
 find_package(SkePU HINTS /opt/skepu3/usr/local/lib/cmake)
