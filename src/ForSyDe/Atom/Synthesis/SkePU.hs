@@ -674,6 +674,7 @@ instance Synthesizable CContext where
                          ]
               , CIR.ECall (ExId $ Name "skepu::write") [CIR.EVar v]
               ]
+          , breakInput CIR.SBreak
         ]
       CIR.TConstructor (CIR.TIdent (ExId IMatrix)) t' ->
         [ CIR.SExpr $
@@ -698,6 +699,7 @@ instance Synthesizable CContext where
                          ]
               , CIR.ECall (ExId $ Name "skepu::write") [CIR.EVar v]
               ]
+          , breakInput CIR.SBreak
         ]
       _ ->
         [ CIR.SVarAssign
