@@ -565,7 +565,6 @@ translateExpr parent procs expr' = out
   apps = map appToIdTypes . mapMaybe (resolveTuples apps') $ apps'
   varToIdType v = (Direct v, makePort . varType $ v)
   appToIdTypes (e, inv, outv) = (e, map varToIdType inv, map varToIdType outv)
-  _ = map (\() -> ()) []
   processes =
     filter (\Process{binder} -> not $ elem binder (Direct <$> binds)) $
       getProcesses parent [] expr
