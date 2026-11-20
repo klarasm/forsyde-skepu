@@ -165,7 +165,7 @@ resolveOp ::
   [(CType, CExpression)] ->
   CType ->
   String ->
-  RWS () [CStatement] Int (CType, CExpression)
+  RWS [CArg] [CStatement] Int (CType, CExpression)
 resolveOp [(t1, expr1)] tout name = do
   case name of
     "length" -> case t1 of
@@ -225,16 +225,17 @@ resolveOp _ _ _ = undefined
 {- | Wrap a C expression into a lambda, returning that as a statement and the
 expression to call it.
 -}
-exprToLambda :: [CArg] -> [CType] -> CType -> [CDecl] -> CoreExpr -> RWS () [CStatement] Int (CType, CExpression)
-exprToLambda args tin tout inports e =
+exprToLambda :: [CType] -> CType -> [CDecl] -> CoreExpr -> RWS [CArg] [CStatement] Int (CType, CExpression)
+exprToLambda tin tout inports e =
     let (b1, e1) = collectBinders e
         largsDef = map (\v -> (varToCType v, Direct v :: CId)) b1
         largs = makeMap [] largsDef
-        args' = map (\(i1, (t, i2)) -> (i1, (removePoint t, i2))) args
         implicit = zip (drop (length largs) tin) inputIds
         implicitArgs = makeMap [] implicit
     in do
-       (_, expr1) <- exprToCExpr (largs <> implicitArgs <> args') tin tout implicit Nothing e1
+       let removePoints = map (\(i1, (t, i2)) -> (i1, (removePoint t, i2)))
+       (_, expr1) <- local (\args -> largs <> implicitArgs <> removePoints args) $
+        exprToCExpr tin tout implicit Nothing e1
        let inExpr = CIR.getVars expr1
            explicitIds = map (\(i, _) -> i) . filter (\(i, _) -> elem i inExpr) $ largs
            notInArgs = filter (not . flip elem explicitIds) . sort $ inExpr
@@ -247,8 +248,8 @@ exprToLambda args tin tout inports e =
        pure (tout, expr2)
 
 -- | Apply a skeleton instance to its arguments
-skelAppToCExpr :: OutputLoc -> [CArg] -> [CType] -> CType -> [CDecl] -> CId -> CExpression -> Maybe CDecl -> RWS () [CStatement] Int (CType, CExpression)
-skelAppToCExpr ret args tin tout inports skel lam assign = do
+skelAppToCExpr :: OutputLoc -> [CType] -> CType -> [CDecl] -> CId -> CExpression -> Maybe CDecl -> RWS [CArg] [CStatement] Int (CType, CExpression)
+skelAppToCExpr ret tin tout inports skel lam assign = do
   outname <- case assign of
     Just i -> pure i
     Nothing -> do
@@ -257,6 +258,7 @@ skelAppToCExpr ret args tin tout inports skel lam assign = do
   skelInstance <- do
     tmpix <- tick
     pure $ ExId Tmp <> Ix tmpix
+  args <- ask
   let
       inputs = zipWith3 derefTo tin (map fst inports) (map (snd . snd) args)
       ini = case (tout, inports, args) of
@@ -334,8 +336,8 @@ decomposeExprTy e = case decomposeExpr e of
 {- | Traverse a GHC Core expression and transform it into a C expression (and
 possibly statements).
 -}
-exprToCExpr :: [CArg] -> [CType] -> CType -> [CDecl] -> Maybe CDecl -> CoreExpr -> RWS () [CStatement] Int (CType, CExpression)
-exprToCExpr args tin tout inports assign expr' =
+exprToCExpr :: [CType] -> CType -> [CDecl] -> Maybe CDecl -> CoreExpr -> RWS [CArg] [CStatement] Int (CType, CExpression)
+exprToCExpr tin tout inports assign expr' =
   case expr' of
     -- Literals
     App _ (Lit (LitNumber _ i)) -> pure (CIR.TLong, CIR.EInt $ fromIntegral i)
@@ -344,15 +346,15 @@ exprToCExpr args tin tout inports assign expr' =
     Lit (LitFloat f) -> pure (CIR.TFloat, CIR.EFloat $ fromRational f)
     App _ (Lit (LitDouble f)) -> pure (CIR.TDouble, CIR.EDouble $ fromRational f)
     Lit (LitDouble f) -> pure (CIR.TDouble, CIR.EDouble $ fromRational f)
-    Var v -> case lookup (Direct v) args of
-      Just (t', v') -> pure (tout, derefTo tout t' v')
+    Var v -> asks $ \args -> case lookup (Direct v) args of
+      Just (t', v') -> (tout, derefTo tout t' v')
       -- Assume the Var is a function
       -- TODO: need to rethink multiple output
       Nothing ->
         let (_, outputs) = makePorts . extractTypes [] . varType $ v
             inArgs = zipWith3 derefTo tin (map fst inports) inputArgs
          in case outputs of
-              [output] -> pure (portToC output, CIR.ECall (Direct v) inArgs)
+              [output] -> (portToC output, CIR.ECall (Direct v) inArgs)
               _ -> error "user functions with multiple output is currently unsupported"
     e ->
       case (decomposeExprTy e, extractProcessType e) of
@@ -366,9 +368,9 @@ exprToCExpr args tin tout inports assign expr' =
           error $ "reduce (farm f): Unimplemented. Should become Map(skepu::MatCol ..). Expr: " <> showPprUnsafe expr
         -- Reduce(i)
         (_, Skeleton _ (ReduceI port fun ini _)) -> do
-              (_, eIni) <- exprToCExpr args [portToC port] tout inports Nothing (coreFromProcType ini)
-              (_, lam) <- exprToLambda args [portToC port, portToC port] (portToC port) inports (coreFromProcType fun)
-              (t2, e2) <- skelAppToCExpr Return args tin tout inports (ExId IReduce) lam Nothing
+              (_, eIni) <- exprToCExpr [portToC port] tout inports Nothing (coreFromProcType ini)
+              (_, lam) <- exprToLambda [portToC port, portToC port] (portToC port) inports (coreFromProcType fun)
+              (t2, e2) <- skelAppToCExpr Return tin tout inports (ExId IReduce) lam Nothing
               case e2 of
                 CIR.ECall skelInstance _ -> do
                   let stmts4 = [CIR.SExpr $ CIR.ECallExpr (CIR.EMemberAccess (CIR.EVar skelInstance) (ExId $ Name "setStartValue")) [eIni]]
@@ -377,42 +379,45 @@ exprToCExpr args tin tout inports assign expr' =
                 _ -> undefined -- This should not happen, skelApptToCExpr will always pass a ECall
         -- All skeleton farm applications
         (_, Skeleton _ (Farm i _ ipo _ (Core argExpr) _)) -> do
-          (_, lam) <- exprToLambda args (map portToC ipo) tout inports argExpr
-          skelAppToCExpr FunArg args tin tout inports (ExId Map <> ExId (Name $ "<" <> show i <> ">")) lam assign
+          (_, lam) <- exprToLambda (map portToC ipo) tout inports argExpr
+          skelAppToCExpr FunArg tin tout inports (ExId Map <> ExId (Name $ "<" <> show i <> ">")) lam assign
         -- Vector length (two parametrised types and one type constraint)
         ((Var inner, Just ([tv], [tvout]), [_, _, _], [e1], _, _), _) | not $ tv `eqType` tvout -> do
-          (t1', expr1) <- exprToCExpr args tin (exprToCType e1) inports Nothing e1
+          (t1', expr1) <- exprToCExpr tin (exprToCType e1) inports Nothing e1
           resolveOp [(t1', expr1)] tout $ getOccString inner
         -- A fully applied binary function (one parametrised type and one type constraint)
         ((Var inner, Just ([tv1, tv2], [tvout]), [t1, _], [e1, e2], _, _), _)  | tv1 `eqType` tvout && tv2 `eqType` tvout -> do
-          (t1', expr1) <- exprToCExpr args tin (exprToCType t1) inports Nothing e1
-          (t2', expr2) <- exprToCExpr args tin (exprToCType t1) inports Nothing e2
+          (t1', expr1) <- exprToCExpr tin (exprToCType t1) inports Nothing e1
+          (t2', expr2) <- exprToCExpr tin (exprToCType t1) inports Nothing e2
           resolveOp [(t1', expr1), (t2', expr2)] tout $ getOccString inner
         -- A partially applied binary function (one parametrised type and one type constraint)
         ((Var inner, Just ([tv1, tv2], [tvout]), [t1, _], [e1], _, _), _) | tv1 `eqType` tvout && tv2 `eqType` tvout -> do
-          (t1', expr1) <- exprToCExpr args tin (exprToCType t1) inports Nothing e1
+          (t1', expr1) <- exprToCExpr tin (exprToCType t1) inports Nothing e1
           let v1 = derefTo (exprToCType t1) (exprToCType t1) $ CIR.EVar $ ExId Input <> Ix 0
           resolveOp [(t1', expr1), (exprToCType t1, v1)] tout $ getOccString inner
         -- An unapplied binary function (one parametrised type and one type constraint)
-        ((Var inner, Just ([tv1, tv2], [tvout]), [_, _], [], [], []), _) | tv1 `eqType` tvout && tv2 `eqType` tvout ->
+        ((Var inner, Just ([tv1, tv2], [tvout]), [_, _], [], [], []), _) | tv1 `eqType` tvout && tv2 `eqType` tvout -> do
+          args <- ask
           resolveOp (take 2 . map snd $ args) tout $ getOccString inner
         -- A fully applied unary function (one parametrised type)
         ((Var inner, Just ([tv], [tvout]), [t1], [e1], _, _), _) | tv `eqType` tvout -> do
-          (t1', expr1) <- exprToCExpr args tin (exprToCType t1) inports Nothing e1
+          (t1', expr1) <- exprToCExpr tin (exprToCType t1) inports Nothing e1
           resolveOp [(t1', expr1)] tout $ getOccString inner
         -- A fully applied unary function (one parametrised type)
         ((Var inner, Just ([tv], [tvout]), [t1, _], [e1], _, _), _) | tv `eqType` tvout -> do
-          (t1', expr1) <- exprToCExpr args tin (exprToCType t1) inports Nothing e1
+          (t1', expr1) <- exprToCExpr tin (exprToCType t1) inports Nothing e1
           resolveOp [(t1', expr1)] tout $ getOccString inner
         -- An unapplied unary function (one parametrised type)
-        ((Var inner, Just ([tv], [tvout]), [_], [], [], []), _) | tv `eqType` tvout ->
+        ((Var inner, Just ([tv], [tvout]), [_], [], [], []), _) | tv `eqType` tvout -> do
+          args <- ask
           resolveOp (take 1 . map snd $ args) tout $ getOccString inner
         -- An unapplied unary function (one parametrised type, one constraint)
-        ((Var inner, Just ([tv], [tvout]), [t1, _], [], [], []), _) | tv `eqType` tvout ->
+        ((Var inner, Just ([tv], [tvout]), [t1, _], [], [], []), _) | tv `eqType` tvout -> do
+          args <- ask
           resolveOp (take 1 . map snd $ args) (exprToCType t1) $ getOccString inner
         -- A fully applied unary function (two parametrised types and two type constraints. e.g. fromIntegral)
         ((Var inner, Just ([tv], [tvout]), [t1, t2, _, _], [e1], _, _), _) | not $ tv `eqType` tvout -> do
-          (t1', e1') <- exprToCExpr args tin (exprToCType t1) inports Nothing e1
+          (t1', e1') <- exprToCExpr tin (exprToCType t1) inports Nothing e1
           resolveOp [(t1', e1')] (exprToCType t2) $ getOccString inner
         ((_, ty, _, _, _, _), _) -> error $ showPprUnsafe e <> " " <> showPprUnsafe ty
 
@@ -470,7 +475,7 @@ makeComb _ _ inports outports liports loports pt =
       argMap = fmap (fmap CIR.EVar) <$> newInPorts
       outArgs = makeMap [] outports
       tys' = map portToC liports
-      assign tys cntr tout a e = runRWS (exprToCExpr argMap tys tout (map snd newInPorts) a e) () cntr
+      assign tys cntr tout a e = runRWS (exprToCExpr tys tout (map snd newInPorts) a e) argMap cntr
    in case decomposeExpr expr of
         (Var v, touts, argExprs, [])
           | (isTupleConstructor . getResType . varType $ v) ->
@@ -491,7 +496,7 @@ bodyToStatement :: [CDecl] -> [CDecl] -> ProcessType -> (OutputLoc, [CArg], [CAr
 bodyToStatement inports outports = \case
   MoCProcess _ (Comb inputs outputs iports oports expr) -> makeComb inputs outputs inports outports iports oports expr
   MoCProcess _ (Delay port expr) ->
-        let ((_, delayExpr), _, _) = runRWS (exprToCExpr [] [portToC port] (portToC port) inports Nothing (coreFromProcType expr)) () 0
+        let ((_, delayExpr), _, _) = runRWS (exprToCExpr [portToC port] (portToC port) inports Nothing (coreFromProcType expr)) [] 0
          in ( FunArg
             , makeMap [] inports
             , makeMap [] outports
@@ -513,7 +518,7 @@ bodyToStatement inports outports = \case
    func e =
     let (args, expr') = collectBinders e
         argMap = makeMap args inports
-        ((_, expr), _, stmts) = runRWS (exprToCExpr argMap (map fst inports) (fst . head $ outports) inports Nothing expr') () 0
+        ((_, expr), _, stmts) = runRWS (exprToCExpr (map fst inports) (fst . head $ outports) inports Nothing expr') argMap 0
      in ( Return
         , argMap
         , []
