@@ -350,6 +350,14 @@ exprToCExpr tmpix args tin tout inports assign = \case
             else error "user functions with multiple output is currently unsupported"
   e ->
     case (decomposeExprTy e, extractProcessType e) of
+      (_, Skeleton expr (Farm 1 1 _ipo _opo (Skeleton _ (ReduceI _port _fun _ini Nothing)) _)) ->
+        error $ "farm (reducei f): Unimplemented. Should become Map(skepu::MatRow ..). Expr: " <> showPprUnsafe expr
+      (_, Skeleton expr (Farm 1 1 _ipo _opo (Skeleton _ (Reduce _port _fun Nothing)) _)) ->
+        error $ "farm (reduce f): Unimplemented. Should become Map(skepu::MatRow ..). Expr: " <> showPprUnsafe expr
+      (_, Skeleton expr (ReduceI _port (Skeleton _ (Farm 2 1 _ipo _opo _fun [])) _ini _)) ->
+        error $ "reducei (farm f): Unimplemented. Should become Map(skepu::MatCol ..). Expr: " <> showPprUnsafe expr
+      (_, Skeleton expr (Reduce _port (Skeleton _ (Farm 2 1 _ipo _opo _fun [])) _)) ->
+        error $ "reduce (farm f): Unimplemented. Should become Map(skepu::MatCol ..). Expr: " <> showPprUnsafe expr
       -- Reduce(i)
       (_, Skeleton _ (ReduceI port fun ini _)) ->
             let (tmpix1, stmts1, (_, eIni)) = exprToCExpr tmpix args [portToC port] tout inports Nothing (coreFromProcType ini)
