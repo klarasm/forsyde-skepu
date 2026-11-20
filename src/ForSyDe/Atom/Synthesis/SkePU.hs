@@ -150,10 +150,6 @@ outputIds = map ((ExId Output <>) . Ix) [0 ..]
 outputArgs :: [CExpression]
 outputArgs = map CIR.EVar outputIds
 
--- | Make a new temporary identifier
-mkTemp :: Int -> (Int, CId)
-mkTemp ix = (ix + 1, ExId Tmp <> Ix ix)
-
 data OutputLoc
   = FunArg
   | Return
