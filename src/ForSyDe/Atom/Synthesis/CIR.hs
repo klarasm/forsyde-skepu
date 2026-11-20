@@ -479,10 +479,11 @@ getVars = go []
     EPointerAccess e _ -> go acc e
     EParen e -> go acc e
     ETernary e1 e2 e3 -> go (go (go acc e1) e2) e3
-    -- EInt _ -> acc
-    -- EFloat _ -> acc
-    -- EChar _ -> acc
-    -- EString _ -> acc
-    -- EStatement _ _ -> acc
-    -- ELambda _ _ _ -> acc
-    _ -> acc
+    ECast _ e -> go acc e
+    EInt _ -> acc
+    EFloat _ -> acc
+    EDouble _ -> acc
+    EChar _ -> acc
+    EString _ -> acc
+    EStatement _ _ -> acc
+    ELambda _ _ _ -> acc
