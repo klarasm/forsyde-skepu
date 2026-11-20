@@ -475,12 +475,12 @@ helper or processed dierectly
 bodyToStatement :: [CDecl] -> [CDecl] -> ProcessType -> (OutputLoc, [CArg], [CArg], [CArg], CStatement)
 bodyToStatement inports outports = \case
   MoCProcess _ (Comb inputs outputs iports oports expr) -> makeComb inputs outputs inports outports iports oports expr
-  MoCProcess _ (Delay port (Core expr)) ->
-        let (_, _, (_, delayExpr)) = exprToCExpr 0 [] [portToC port] (portToC port) inports Nothing expr
+  MoCProcess _ (Delay port expr) ->
+        let (_, _, (_, delayExpr)) = exprToCExpr 0 [] [portToC port] (portToC port) inports Nothing (coreFromProcType expr)
          in ( FunArg
-            , map (\(t', i) -> (i, (t', CIR.EVar i))) inports
-            , map (\(t', i) -> (i, (t', CIR.EVar i))) outports
-            , zipWith (\i (t', _) -> (i, (t', delayExpr))) [ExId IDelay] outports
+            , makeMap [] inports
+            , makeMap [] outports
+            , [(ExId IDelay, (CIR.TPointer (portToC port), delayExpr))]
             , -- The delay can both be used on intermediary signals and input/output
               -- signals. When used on an output signal, it needs to also output the
               -- current value of the delay, hence the shuffling of values.
