@@ -21,14 +21,15 @@ synopsis:            Source-to-source compiler for ForSyDe-Atom models to SkePU
 
 dependencies:
 - base >= 4.7 && < 5
+- containers >=0.7 && <0.8
 - filepath >=1.5.4.0 && <1.5.5
 - forsyde-atom >=0.3.2 && <0.3.3
 - ghc >=9.10.2 && <9.11
 - ghc-paths >=0.1.0.12 && <0.1.1
+- mtl >=2.3 && <2.4
 - optparse-applicative >=0.18.1.0 && <0.18.2
-- syb >=0.7.2.4 && <0.7.3
-- containers >=0.7 && <0.8
 - prettyprinter >=1.7.1 && <1.8
+- syb >=0.7.2.4 && <0.7.3
 
 ghc-options:
 - -Wall
