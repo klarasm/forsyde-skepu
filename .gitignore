@@ -1,2 +1,4 @@
 .stack-work/
 *~
+/compiler-output
+/forsyde-skepu.cabal
