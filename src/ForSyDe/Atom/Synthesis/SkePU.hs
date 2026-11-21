@@ -154,11 +154,11 @@ data OutputLoc
   = FunArg
   | Return
 
-tick :: Num s => MonadState s m => m s
-tick = do
+ticks :: (MonadState t m, Num t) => (t -> b) -> m b
+ticks f = do
   n <- get
   put (n+1)
-  pure n
+  pure (f n)
 
 -- | Match names of functions to C operations.
 resolveOp ::
@@ -252,12 +252,8 @@ skelAppToCExpr :: OutputLoc -> [CType] -> CType -> [CDecl] -> CId -> CExpression
 skelAppToCExpr ret tin tout inports skel lam assign = do
   outname <- case assign of
     Just i -> pure i
-    Nothing -> do
-      tmpix <- tick
-      pure (tout, ExId Tmp <> Ix tmpix)
-  skelInstance <- do
-    tmpix <- tick
-    pure $ ExId Tmp <> Ix tmpix
+    Nothing -> ticks $ \tmpix -> (tout, ExId Tmp <> Ix tmpix)
+  skelInstance <- ticks $ \tmpix -> ExId Tmp <> Ix tmpix
   args <- ask
   let
       inputs = zipWith3 derefTo tin (map fst inports) (map (snd . snd) args)
