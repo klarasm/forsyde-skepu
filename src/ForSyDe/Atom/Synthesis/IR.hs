@@ -210,7 +210,7 @@ data System a = System
   -- ^ Vertices inside the system
   , edges :: [Edge]
   -- ^ Edges between vertices local to the system
-  , graph :: Maybe G.Graph
+  , graph :: G.Graph
   -- ^ Dependencies excluding delay edges
   , schedule :: Maybe [Int]
   -- ^ A schedule if one can be computed
@@ -229,7 +229,7 @@ instance Pretty (System a) where
           , pretty processes
           , pretty vertices
           , pretty edges
-          , pretty "dependencies =" <+> pretty (G.edges <$> graph)
+          , pretty "dependencies =" <+> pretty (G.edges graph)
           , case schedule of
               Just sched ->
                 pretty "schedule ="
@@ -373,17 +373,8 @@ instance Pretty Port where
 {- | Translate a Core program into a top-level system. The top-level system
 itself only contains a list of processes.
 -}
-translate :: CoreProgram -> (System a)
-translate f =
-  System
-    { inputs = []
-    , outputs = []
-    , processes
-    , vertices = []
-    , edges = []
-    , graph = Nothing
-    , schedule = Nothing
-    }
+translate :: CoreProgram -> [Process a]
+translate f = processes
  where
   processes = reverse . foldl' (makeProcesses Empty) [] . map Right $ f
   makeProcesses parent acc bind =
@@ -606,7 +597,7 @@ makeSystem inputs outputs processes vertices = out
   selfEdges = any (\Edge{source, target} -> source == target) edges
   schedulable = not selfEdges && (all (\(G.Node _ forest) -> forest == []) . G.scc $ graph)
   schedule = if schedulable then pure $ G.topSort graph else Nothing
-  out = System{graph = Just graph, ..}
+  out = System{..}
 
 -- | Find processes matching the supplied Id
 procsFromId :: Id a -> [Process b] -> [Process b]
@@ -876,8 +867,8 @@ makeEdge Vertex{id=source, outputs, delay} Vertex{id=target, inputs} = mapMaybe 
         Nothing
 
 -- | Gather all processes referenced by the one corresponding to the string
-filterUnused :: String -> (System a) -> Maybe (Process a, [Process a])
-filterUnused procname System{..} =
+filterUnused :: String -> [Process a] -> Maybe (Process a, [Process a])
+filterUnused procname processes =
   case filter (procNamed procname) processes of
     p@Process{..} : _ ->
       let internal' = S.elems . findInternal (S.fromList processes) $ p
