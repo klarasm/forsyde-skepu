@@ -36,6 +36,7 @@ module ForSyDe.Atom.Synthesis.IR (
 )
 where
 
+import Control.Applicative
 import Data.Data (Data, Typeable)
 import Data.List (sort)
 import Data.Maybe (listToMaybe, mapMaybe, maybeToList)
@@ -499,7 +500,9 @@ makeProcess parent procs = \case
             }
    where
     body = stripLamApps expr'
-    subsystem = translateExpr (Direct bind) procs body
+    subsystem =
+      translateExpr (Direct bind) procs body
+        <|> translateExprInline (Direct bind) procs inports outports body
     (inports, outports) = makePorts . extractTypes [] $ varType bind
   Left (ix, body, inputs, outputs) ->
     Just
@@ -514,7 +517,9 @@ makeProcess parent procs = \case
         }
    where
     (inports, outports) = (snd <$> inputs, snd <$> outputs)
-    subsystem = translateExpr (parent <> Ix ix) procs body
+    subsystem =
+      translateExpr (parent <> Ix ix) procs body
+        <|> translateExprInline (parent <> Ix ix) procs inports outports body
 
 {- | Get all internal function applications of an expression
 This is used to not filter out internal process applications
@@ -590,6 +595,35 @@ translateExpr parent procs expr' = out
             , outputs = map varToIdType outputs
             , ..
             }
+
+translateExprInline :: Id a -> [Process b] -> [Port] -> [Port] -> CoreExpr -> Maybe (System b)
+translateExprInline parent procs inports outports expr = out
+ where
+  inputs = zipWith (\i p -> (() <$ parent <> Ix 0 <> Ix i, p)) [1..] inports
+  outputs = zipWith (\i p -> (() <$ parent <> Ix 0 <> Ix i, p)) [(1 + length inputs)..] outports
+  processes = getProcesses parent [] expr
+  (nextix, vertices) = foldr (makeVertexFromApps (() <$ parent) (procs <> processes)) (0, []) [(expr, inputs, outputs)]
+  edges = makeEdge <$> vertices <*> vertices >>= id
+  dependencies =
+    mapMaybe
+      ( \Edge{source, target, delayEdge} ->
+          if delayEdge
+            then Nothing
+            else Just $ (source, target)
+      )
+      edges
+  graph = G.buildG (0, nextix - 1) dependencies
+  -- If there are no self-edges and there are no strongly-connected componets
+  -- the graph is a DAG, meaning topological sort can produce a valid schedule
+  selfEdges = any (\Edge{source, target} -> source == target) edges
+  schedulable = not selfEdges && (all (\(G.Node _ forest) -> forest == []) . G.scc $ graph)
+  schedule = if schedulable then pure $ G.topSort graph else Nothing
+  out =
+    case expr of
+      App (App (App (App (App (Var composition) (Type _)) (Type _)) (Type _)) _) _
+        | getOccString composition == "." ->
+            pure $ System{graph = Just graph, ..}
+      _ -> Nothing
 
 -- | Find processes matching the supplied Id
 procsFromId :: Id a -> [Process b] -> [Process b]
