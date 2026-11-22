@@ -568,33 +568,11 @@ translateExpr parent procs expr' = out
   processes =
     filter (\Process{binder} -> not $ elem binder (Direct <$> binds)) $
       getProcesses parent [] expr
-  (nextix, vertices) = foldr (makeVertexFromApps (() <$ parent) (procs <> processes)) (0, []) apps
-  edges = makeEdge <$> vertices <*> vertices >>= id
-  dependencies =
-    mapMaybe
-      ( \Edge{source, target, delayEdge} ->
-          if delayEdge
-            then Nothing
-            else Just $ (source, target)
-      )
-      edges
-  graph = G.buildG (0, nextix - 1) dependencies
-  -- If there are no self-edges and there are no strongly-connected componets
-  -- the graph is a DAG, meaning topological sort can produce a valid schedule
-  selfEdges = any (\Edge{source, target} -> source == target) edges
-  schedulable = not selfEdges && (all (\(G.Node _ forest) -> forest == []) . G.scc $ graph)
-  schedule = if schedulable then pure $ G.topSort graph else Nothing
+  (_, vertices) = foldr (makeVertexFromApps (() <$ parent) (procs <> processes)) (0, []) apps
   out =
     if null vertices
-      then Nothing
-      else
-        pure $
-          System
-            { graph = Just graph
-            , inputs = map varToIdType inputs
-            , outputs = map varToIdType outputs
-            , ..
-            }
+      then fail "No vertices in the system"
+      else pure $ makeSystem (map varToIdType inputs) (map varToIdType outputs) (procs <> processes) vertices
 
 translateExprInline :: Id a -> [Process b] -> [Port] -> [Port] -> CoreExpr -> Maybe (System b)
 translateExprInline parent procs inports outports expr = out
@@ -602,7 +580,17 @@ translateExprInline parent procs inports outports expr = out
   inputs = zipWith (\i p -> (() <$ parent <> Ix 0 <> Ix i, p)) [1..] inports
   outputs = zipWith (\i p -> (() <$ parent <> Ix 0 <> Ix i, p)) [(1 + length inputs)..] outports
   processes = getProcesses parent [] expr
-  (nextix, vertices) = foldr (makeVertexFromApps (() <$ parent) (procs <> processes)) (0, []) [(expr, inputs, outputs)]
+  (_, vertices) = foldr (makeVertexFromApps (() <$ parent) (procs <> processes)) (0, []) [(expr, inputs, outputs)]
+  out =
+    case expr of
+      App (App (App (App (App (Var composition) (Type _)) (Type _)) (Type _)) _) _
+        | getOccString composition == "." ->
+            pure $ makeSystem inputs outputs (procs <> processes) vertices
+      _ -> fail "Not a composition"
+
+makeSystem :: [(Id (), Port)] -> [(Id (), Port)] -> [Process a] -> [Vertex a] -> System a
+makeSystem inputs outputs processes vertices = out
+ where
   edges = makeEdge <$> vertices <*> vertices >>= id
   dependencies =
     mapMaybe
@@ -612,18 +600,13 @@ translateExprInline parent procs inports outports expr = out
             else Just $ (source, target)
       )
       edges
-  graph = G.buildG (0, nextix - 1) dependencies
+  graph = G.buildG (0, length vertices - 1) dependencies
   -- If there are no self-edges and there are no strongly-connected componets
   -- the graph is a DAG, meaning topological sort can produce a valid schedule
   selfEdges = any (\Edge{source, target} -> source == target) edges
   schedulable = not selfEdges && (all (\(G.Node _ forest) -> forest == []) . G.scc $ graph)
   schedule = if schedulable then pure $ G.topSort graph else Nothing
-  out =
-    case expr of
-      App (App (App (App (App (Var composition) (Type _)) (Type _)) (Type _)) _) _
-        | getOccString composition == "." ->
-            pure $ System{graph = Just graph, ..}
-      _ -> Nothing
+  out = System{graph = Just graph, ..}
 
 -- | Find processes matching the supplied Id
 procsFromId :: Id a -> [Process b] -> [Process b]
