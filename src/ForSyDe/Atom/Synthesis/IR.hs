@@ -36,10 +36,9 @@ module ForSyDe.Atom.Synthesis.IR (
 )
 where
 
-import Control.Monad
 import Data.Data (Data, Typeable)
 import Data.List (sort)
-import Data.Maybe (catMaybes, listToMaybe, mapMaybe)
+import Data.Maybe (listToMaybe, mapMaybe, maybeToList)
 import qualified Data.Set as S
 import GHC.Core
 import GHC.Core.DataCon
@@ -564,9 +563,9 @@ translateExpr parent procs expr' = out
   processes =
     filter (\Process{binder} -> not $ elem binder (Direct <$> binds)) $
       getProcesses parent [] expr
-  (ixs, realVertices') = unzip $ zipWith (\ix -> makeVertexFromApps (() <$ parent <> Ix ix) (procs <> processes) ix) [0..] apps
-  vertices = catMaybes . join $ realVertices'
-  nextix = case ixs of [] -> 0; xs -> maximum xs
+  makeV e (ix, acc) = (ix', acc <> acc') where
+    (ix', acc') = makeVertexFromApps (() <$ parent) (procs <> processes) ix e
+  (nextix, vertices) = foldr makeV (0, []) apps
   edges = makeEdge <$> vertices <*> vertices >>= id
   dependencies =
     mapMaybe
@@ -827,7 +826,7 @@ makeVertexFromApps ::
   [Process b] ->
   Int ->
   (CoreExpr, [(Id (), Port)], [(Id (), Port)]) ->
-  (Int, [Maybe (Vertex b)])
+  (Int, [Vertex b])
 makeVertexFromApps parent procs ix = \case
   (App (App (App (App (App (Var composition) (Type t1)) (Type _)) (Type _)) e1) e2, ins, outs)
     | getOccString composition == "." ->
@@ -836,7 +835,7 @@ makeVertexFromApps parent procs ix = \case
             (ix2, v2) = makeVertexFromApps parent procs (ix + 1) (e2, ins, [intermediate])
         in (max ix1 ix2, v1 <> v2)
   (e, ins, outs) ->
-    (ix + 1, pure $ makeVertex parent procs ix (e, ins, outs))
+    (ix + 1, maybeToList $ makeVertex parent procs ix (e, ins, outs))
 
 {- | Match binders with targets and source from vertices. sources should never
  - happen in practice. While GHC Uniques are not guarranteed to actually be
