@@ -199,9 +199,9 @@ coreFromProcType = \case
 
 -- | A system containing mainly processes, vertices and edges.
 data System a = System
-  { inputs :: [Var]
+  { inputs :: [(Id (), Port)]
   -- ^ The system input binders
-  , outputs :: [Var]
+  , outputs :: [(Id (), Port)]
   -- ^ The system output binders
   , processes :: [Process a]
   -- ^ Processes defined in the system
@@ -223,8 +223,8 @@ instance Pretty (System a) where
     nest 4 $
       pretty "System"
         <> tupled
-          [ pretty "inputs =" <+> (pretty . showPprUnsafe) inputs
-          , pretty "outputs =" <+> (pretty . showPprUnsafe) outputs
+          [ pretty "inputs =" <+> pretty inputs
+          , pretty "outputs =" <+> pretty outputs
           , pretty processes
           , pretty vertices
           , pretty edges
@@ -563,9 +563,7 @@ translateExpr parent procs expr' = out
   processes =
     filter (\Process{binder} -> not $ elem binder (Direct <$> binds)) $
       getProcesses parent [] expr
-  makeV e (ix, acc) = (ix', acc <> acc') where
-    (ix', acc') = makeVertexFromApps (() <$ parent) (procs <> processes) ix e
-  (nextix, vertices) = foldr makeV (0, []) apps
+  (nextix, vertices) = foldr (makeVertexFromApps (() <$ parent) (procs <> processes)) (0, []) apps
   edges = makeEdge <$> vertices <*> vertices >>= id
   dependencies =
     mapMaybe
@@ -584,7 +582,14 @@ translateExpr parent procs expr' = out
   out =
     if null vertices
       then Nothing
-      else pure $ System { graph = Just graph , .. }
+      else
+        pure $
+          System
+            { graph = Just graph
+            , inputs = map varToIdType inputs
+            , outputs = map varToIdType outputs
+            , ..
+            }
 
 -- | Find processes matching the supplied Id
 procsFromId :: Id a -> [Process b] -> [Process b]
@@ -824,18 +829,17 @@ makeVertex parent procs ix = \case
 makeVertexFromApps ::
   Id () ->
   [Process b] ->
-  Int ->
   (CoreExpr, [(Id (), Port)], [(Id (), Port)]) ->
+  (Int, [Vertex b]) ->
   (Int, [Vertex b])
-makeVertexFromApps parent procs ix = \case
+makeVertexFromApps parent procs expr (ix, acc) = case expr of
   (App (App (App (App (App (Var composition) (Type t1)) (Type _)) (Type _)) e1) e2, ins, outs)
     | getOccString composition == "." ->
         let intermediate = (parent <> Ix ix <> Ix 0, makePort t1)
-            (ix1, v1) = makeVertexFromApps parent procs (ix) (e1, [intermediate], outs)
-            (ix2, v2) = makeVertexFromApps parent procs (ix + 1) (e2, ins, [intermediate])
-        in (max ix1 ix2, v1 <> v2)
+            (ix1, v1) = makeVertexFromApps parent procs (e1, [intermediate], outs) (ix, acc)
+         in makeVertexFromApps parent procs (e2, ins, [intermediate]) (ix1, v1)
   (e, ins, outs) ->
-    (ix + 1, maybeToList $ makeVertex parent procs ix (e, ins, outs))
+    (ix + 1, maybeToList (makeVertex parent procs ix (e, ins, outs)) <> acc)
 
 {- | Match binders with targets and source from vertices. sources should never
  - happen in practice. While GHC Uniques are not guarranteed to actually be

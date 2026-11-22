@@ -587,8 +587,8 @@ instance Synthesizable CContext where
                 systemProcs = S.elems . mconcat . map (vertexProcs (S.fromList procs)) $ vertices
                 -- Synthesise all referenced processes.
                 (subsysNew, allC1) = foldr (synthesize procs') (newC, allC) systemProcs
-                inDefs = map varToCDef inputs
-                outDefs = map varToCDef outputs
+                inDefs = map (\(i, t) -> (portToC t, IEmpty <$ i)) inputs
+                outDefs = map (\(i, t) -> (portToC t, IEmpty <$ i)) outputs
                 updateId f (i, (t, e)) = (f i, (t, f <$> e))
                 -- Link all vertices to its invoked process' context.
                 vertexContext v@Vertex{process, id = ix} = case process of
@@ -629,7 +629,7 @@ instance Synthesizable CContext where
                 -- Collect the vertices in scheduled order
                 schedVert = sequenceA <$> map findVert <$> schedule >>= id
                 delaySigs' = S.map (\(t, b, _) -> (t, (IEmpty <$ b) <> ExId IDelay)) delaySigs
-                pointers = delaySigs' <> (S.map (\v -> ((portToC . makePort . varType) v, Direct v)) $ S.fromList (inputs <> outputs))
+                pointers = delaySigs' <> (S.fromList . map (\(i, t) -> (portToC t, IEmpty <$ i)) $ (inputs <> outputs))
                 -- Get the calls to the scheduled processes, passing which
                 -- Ids should be dereferenced or not.
                 schedStmts = map (CIR.SExpr . vertexToExpr (S.map snd pointers)) <$> schedVert
