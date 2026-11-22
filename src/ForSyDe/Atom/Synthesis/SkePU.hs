@@ -387,8 +387,8 @@ exprToCExpr tin tout inports assign expr' =
         -- A partially applied binary function (one parametrised type and one type constraint)
         ((Var inner, Just ([tv1, tv2], [tvout]), [t1, _], [e1], _, _), _) | tv1 `eqType` tvout && tv2 `eqType` tvout -> do
           (t1', expr1) <- exprToCExpr tin (exprToCType t1) inports Nothing e1
-          let v1 = derefTo (exprToCType t1) (exprToCType t1) $ CIR.EVar $ ExId Input <> Ix 0
-          resolveOp [(t1', expr1), (exprToCType t1, v1)] tout $ getOccString inner
+          args <- ask
+          resolveOp ([(t1', expr1)] <> (take 1 . map snd $ args)) tout $ getOccString inner
         -- An unapplied binary function (one parametrised type and one type constraint)
         ((Var inner, Just ([tv1, tv2], [tvout]), [_, _], [], [], []), _) | tv1 `eqType` tvout && tv2 `eqType` tvout -> do
           args <- ask
