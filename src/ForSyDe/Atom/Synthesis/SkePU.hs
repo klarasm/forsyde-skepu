@@ -196,19 +196,17 @@ resolveOp [(t1, expr1), (t2, expr2)] tout name = do
     "/" -> pure (tout, CIR.EBinOp CIR.Divide e1 e2)
     -- see https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2025/p3724r0.html
     "div" ->
-      let v1 = derefTo CIR.TVoid t1 expr1
-          v2 = derefTo CIR.TVoid t2 expr2
-       in pure
-            ( tout
-            , CIR.EBinOp
-                CIR.Subtract
-                (CIR.EBinOp CIR.Divide v1 v2)
-                ( CIR.EBinOp
-                    CIR.LogicalAnd
-                    (CIR.EBinOp CIR.Less (CIR.EBinOp CIR.BitwiseXor v1 v2) (CIR.EInt 0))
-                    (CIR.EBinOp CIR.NotEqual (CIR.EBinOp CIR.Modulo v1 v2) (CIR.EInt 0))
-                )
+      pure
+        ( tout
+        , CIR.EBinOp
+            CIR.Subtract
+            (CIR.EBinOp CIR.Divide e1 e2)
+            ( CIR.EBinOp
+                CIR.LogicalAnd
+                (CIR.EBinOp CIR.Less (CIR.EBinOp CIR.BitwiseXor e1 e2) (CIR.EInt 0))
+                (CIR.EBinOp CIR.NotEqual (CIR.EBinOp CIR.Modulo e1 e2) (CIR.EInt 0))
             )
+        )
     "const" -> pure (tout, e1)
     "max" -> pure (tout, CIR.ETernary (CIR.EBinOp CIR.Greater e1 e2) e1 e2)
     "min" -> pure (tout, CIR.ETernary (CIR.EBinOp CIR.Less e1 e2) e1 e2)
