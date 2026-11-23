@@ -351,6 +351,8 @@ exprToCExpr tin tout inports assign expr' =
               [output] -> (portToC output, CIR.ECall (Direct v) inArgs)
               _ -> error "user functions with multiple output is currently unsupported"
     e ->
+    -- NOTE: should probably do a new runRWS for skeleton exprToCExpr/exprToLambda/skelAppToCExpr.
+    -- Otherwise any statements may be put into the wrong scope.
       case (decomposeExprTy e, extractProcessType e) of
         (_, Skeleton expr (Farm 1 1 _ipo _opo (Skeleton _ (ReduceI _port _fun _ini Nothing)) _)) ->
           error $ "farm (reducei f): Unimplemented. Should become Map(skepu::MatRow ..). Expr: " <> showPprUnsafe expr
