@@ -370,9 +370,7 @@ instance Pretty Port where
       pretty "Vector"
         <> (parens . pretty) inner
 
-{- | Translate a Core program into a top-level system. The top-level system
-itself only contains a list of processes.
--}
+-- | Translate a Core program into a list of processes.
 translate :: CoreProgram -> [Process a]
 translate f = processes
  where
