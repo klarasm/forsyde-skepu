@@ -225,27 +225,27 @@ expression to call it.
 -}
 exprToLambda :: [CType] -> CType -> [CDecl] -> CoreExpr -> RWS [CArg] [CStatement] Int (CType, CExpression)
 exprToLambda tin tout inports e =
-    let (b1, e1) = collectBinders e
-        largsDef = map (\v -> (varToCType v, Direct v :: CId)) b1
-        largs = makeMap [] largsDef
-        implicit = zip (drop (length largs) tin) inputIds
-        implicitArgs = makeMap [] implicit
-    in do
-       args' <- ask
-       ix <- ticks id
-       let args = largs <> implicitArgs <> map (\(i1, (t, i2)) -> (i1, (removePoint t, i2))) args'
-           -- Any statements that are created should not be put into the current scope. Run a new RWS
-           ((_, expr1), _, stmts) = runRWS (exprToCExpr tin tout implicit Nothing e1) args ix
-       let inExpr = CIR.getVars expr1
-           explicitIds = map (\(i, _) -> i) . filter (\(i, _) -> elem i inExpr) $ largs
-           notInArgs = filter (not . flip elem explicitIds) . sort $ inExpr
-           captured =
-             filter (\(_, i) -> i `elem` notInArgs)
-               . map (\(t, i) -> (removePoint t, i))
-               $ drop (length largs + length implicit) inports
-           inputs = largsDef <> implicit <> captured
-           expr2 = CIR.ELambda [] inputs $ CIR.SScope $ stmts <> [CIR.SReturn $ Just expr1]
-       pure (tout, expr2)
+  let (b1, e1) = collectBinders e
+      largsDef = map (\v -> (varToCType v, Direct v :: CId)) b1
+      largs = makeMap [] largsDef
+      implicit = zip (drop (length largs) tin) inputIds
+      implicitArgs = makeMap [] implicit
+   in do
+        args' <- ask
+        ix <- ticks id
+        let args = largs <> implicitArgs <> map (\(i1, (t, i2)) -> (i1, (removePoint t, i2))) args'
+            -- Any statements that are created should not be put into the current scope. Run a new RWS
+            ((_, expr1), _, stmts) = runRWS (exprToCExpr tin tout implicit Nothing e1) args ix
+        let inExpr = CIR.getVars expr1
+            explicitIds = map (\(i, _) -> i) . filter (\(i, _) -> elem i inExpr) $ largs
+            notInArgs = filter (not . flip elem explicitIds) . sort $ inExpr
+            captured =
+              filter (\(_, i) -> i `elem` notInArgs)
+                . map (\(t, i) -> (removePoint t, i))
+                $ drop (length largs + length implicit) inports
+            inputs = largsDef <> implicit <> captured
+            expr2 = CIR.ELambda [] inputs $ CIR.SScope $ stmts <> [CIR.SReturn $ Just expr1]
+        pure (tout, expr2)
 
 -- | Apply a skeleton instance to its arguments
 skelAppToCExpr :: OutputLoc -> [CType] -> CType -> [CDecl] -> CId -> CExpression -> Maybe CDecl -> RWS [CArg] [CStatement] Int (CType, CExpression)
