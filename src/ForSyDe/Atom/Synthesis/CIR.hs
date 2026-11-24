@@ -286,7 +286,7 @@ instance (Pretty a) => Pretty (Expression a) where
   pretty = \case
     EVar x -> pretty x
     EInt i -> pretty i
-    EFloat f -> pretty f
+    EFloat f -> pretty f <> pretty "f"
     EDouble d -> pretty d
     EChar c -> squotes . pretty $ c
     EString s -> dquotes . pretty $ s
