@@ -166,7 +166,7 @@ data Expression a
   | EPointerAccess (Expression a) (a)
   | EParen (Expression a)
   | EStatement [(Statement a)] (Expression a)
-  | ELambda [(a)] [((Type a), (a))] (Statement a)
+  | ELambda [a] [(a, Type a)] (Statement a)
   | ETernary (Expression a) (Expression a) (Expression a)
   | ECast (Type a) (Expression a)
   deriving (Data, Typeable, Eq, Ord, Show)
@@ -231,11 +231,11 @@ instance Functor Statement where
     SStream n dir exprs -> SStream (f n) dir (map (fmap f) exprs)
 
 data Global a
-  = GFuncDeclare (Maybe StorageClass) (Type a) a [(Type a, a)]
-  | GFuncDef (Maybe StorageClass) (Type a) (a) [(Type a, a)] (Statement a)
+  = GFuncDeclare (Maybe StorageClass) (Type a) a [(a, Type a)]
+  | GFuncDef (Maybe StorageClass) (Type a) (a) [(a, Type a)] (Statement a)
   | GVarDeclare (Type a) a
   | GVarDef (Type a) a (Expression a)
-  | GStruct a [(Type a, a)]
+  | GStruct a [(a, Type a)]
   | GMacro a [a]
   deriving (Data, Typeable, Eq, Ord, Show)
 instance Functor Global where
@@ -247,8 +247,8 @@ instance Functor Global where
     GStruct n membs -> GStruct (f n) (map (parmFmap f) membs)
     GMacro n args -> GMacro (f n) (map f args)
 
-parmFmap :: (Functor f) => (a -> b) -> (f a, a) -> (f b, b)
-parmFmap f (t, n) = (f <$> t, f n)
+parmFmap :: (Functor f) => (a -> b) -> (a, f a) -> (b, f b)
+parmFmap f (n, t) = (f n, f <$> t)
 
 data Program a = Prog [Global a]
   deriving (Data, Typeable, Eq, Ord, Show)
@@ -458,9 +458,9 @@ instance (Pretty a) => Pretty (Global a) where
     GMacro macro opt ->
       pretty "#" <> pretty macro <+> (hsep . map pretty) opt
 
-prettyParam :: (Pretty a) => ((Type a), a) -> Doc ann
-prettyParam (t@(TPointer _), i) = pretty t <> pretty i
-prettyParam (t, i) = pretty t <+> pretty i
+prettyParam :: (Pretty a) => (a, Type a) -> Doc ann
+prettyParam (i, t@(TPointer _)) = pretty t <> pretty i
+prettyParam (i, t) = pretty t <+> pretty i
 
 instance (Pretty a) => Pretty (Program a) where
   pretty (Prog globals) =

@@ -57,7 +57,7 @@ type CExpression = CIR.Expression CId
 type CStatement = CIR.Statement CId
 type CProgram = CIR.Program CId
 type CId = Id IdExt
-type CDecl = (CType, CId)
+type CDecl = (CId, CType)
 type CArg = (CId, (CType, CExpression))
 
 data CContext = CContext
@@ -139,7 +139,7 @@ varToCDef :: Var -> CDecl
 varToCDef v =
   let ty = varToCType v
       name = Direct v
-   in (ty, name)
+   in (name, ty)
 
 inputIds :: [CId]
 inputIds = map ((ExId Input <>) . Ix) [0 ..]
@@ -226,9 +226,9 @@ expression to call it.
 exprToLambda :: [CType] -> CType -> [CDecl] -> CoreExpr -> RWS [CArg] [CStatement] Int (CType, CExpression)
 exprToLambda tin tout inports e =
   let (b1, e1) = collectBinders e
-      largsDef = map (\v -> (varToCType v, Direct v :: CId)) b1
+      largsDef = map (\v -> (Direct v :: CId, varToCType v)) b1
       largs = makeMap [] largsDef
-      implicit = zip (drop (length largs) tin) inputIds
+      implicit = zip inputIds (drop (length largs) tin)
       implicitArgs = makeMap [] implicit
    in do
         args' <- ask
@@ -240,8 +240,8 @@ exprToLambda tin tout inports e =
             explicitIds = map (\(i, _) -> i) . filter (\(i, _) -> elem i inExpr) $ largs
             notInArgs = filter (not . flip elem explicitIds) . sort $ inExpr
             captured =
-              filter (\(_, i) -> i `elem` notInArgs)
-                . map (\(t, i) -> (removePoint t, i))
+              filter (\(i, _) -> i `elem` notInArgs)
+                . map (\(i, t) -> (i, removePoint t))
                 $ drop (length largs + length implicit) inports
             inputs = largsDef <> implicit <> captured
             expr2 = CIR.ELambda [] inputs $ CIR.SScope $ stmts <> [CIR.SReturn $ Just expr1]
@@ -252,13 +252,13 @@ skelAppToCExpr :: OutputLoc -> [CType] -> CType -> [CDecl] -> CId -> CExpression
 skelAppToCExpr ret tin tout inports skel lam assign = do
   outname <- case assign of
     Just i -> pure i
-    Nothing -> ticks $ \tmpix -> (tout, ExId Tmp <> Ix tmpix)
+    Nothing -> ticks $ \tmpix -> (ExId Tmp <> Ix tmpix, tout)
   skelInstance <- ticks $ \tmpix -> ExId Tmp <> Ix tmpix
   args <- ask
   let
-      inputs = zipWith3 derefTo tin (map fst inports) (map (snd . snd) args)
+      inputs = zipWith3 derefTo tin (map snd inports) (map (snd . snd) args)
       ini = case (tout, inports, args) of
-        (CIR.TConstructor (CIR.TIdent (ExId IVector)) _, (inty, _) : _, (_, (_, expr)) : _) ->
+        (CIR.TConstructor (CIR.TIdent (ExId IVector)) _, (_, inty) : _, (_, (_, expr)) : _) ->
           Just
             [ CIR.ECallExpr
                 ( CIR.EMemberAccess
@@ -267,7 +267,7 @@ skelAppToCExpr ret tin tout inports skel lam assign = do
                 )
                 []
             ]
-        (CIR.TConstructor (CIR.TIdent (ExId IMatrix)) _, (inty, _) : _, (_, (_, expr)) : _) ->
+        (CIR.TConstructor (CIR.TIdent (ExId IMatrix)) _, (_, inty) : _, (_, (_, expr)) : _) ->
           Just
             [ CIR.ECallExpr
                 ( CIR.EMemberAccess
@@ -283,7 +283,7 @@ skelAppToCExpr ret tin tout inports skel lam assign = do
                 []
             ]
         _ -> Nothing
-      outDerefed = derefTo CIR.TVoid (fst outname) $ CIR.EVar . snd $ outname
+      outDerefed = derefTo CIR.TVoid (snd outname) $ CIR.EVar . fst $ outname
       call =
         CIR.ECall skelInstance $
           case ret of
@@ -291,7 +291,7 @@ skelAppToCExpr ret tin tout inports skel lam assign = do
             Return -> inputs
       stmts =
         case assign of
-          Nothing -> [uncurry CIR.SVarDecl outname ini]
+          Nothing -> [CIR.SVarDecl (snd outname) (fst outname) ini]
           _ ->  case ini of
             Just ini' -> [CIR.SExpr $ CIR.ECallExpr (CIR.EMemberAccess outDerefed . ExId $ Name "init") ini']
             _ -> []
@@ -301,7 +301,7 @@ skelAppToCExpr ret tin tout inports skel lam assign = do
           Return -> []
   tell stmts
   pure ( case ret of
-        FunArg -> CIR.EVar <$> outname
+        FunArg -> (\(v, t) -> (t, CIR.EVar v)) outname
         Return -> (tout, call)
     )
 
@@ -348,7 +348,7 @@ exprToCExpr tin tout inports assign expr' =
       -- TODO: need to rethink multiple output
       Nothing ->
         let (_, outputs) = makePorts . extractTypes [] . varType $ v
-            inArgs = zipWith3 derefTo tin (map fst inports) inputArgs
+            inArgs = zipWith3 derefTo tin (map snd inports) inputArgs
          in case outputs of
               [output] -> (portToC output, CIR.ECall (Direct v) inArgs)
               _ -> error "user functions with multiple output is currently unsupported"
@@ -441,15 +441,15 @@ derefTo :: CIR.Type a1 -> CIR.Type a2 -> CIR.Expression a -> CIR.Expression a
 derefTo outty inty = derefArg (needDeref (0 :: Int) (inty, outty))
 
 -- | Make an argument map, from args if existent otherwise from ports
-makeMap :: [CoreBndr] -> [(a2, Id a)] -> [(Id a, (a2, CIR.Expression (Id a)))]
+makeMap :: [CoreBndr] -> [(Id a, a2)] -> [(Id a, (a2, CIR.Expression (Id a)))]
 makeMap args ports = fmap (fmap (CIR.EVar)) <$> updatePorts args ports
 
-updatePorts :: [CoreBndr] -> [(a2, Id a)] -> [((Id a), (a2, Id a))]
-updatePorts [] ports = map (\(ty, ident) -> (ident, (ty, ident))) ports
-updatePorts args ports = zipWith (\b (t, _) -> (Direct b, (t, (Direct b)))) args ports
+updatePorts :: [CoreBndr] -> [(Id a, a2)] -> [((Id a), (a2, Id a))]
+updatePorts [] ports = map (\(ident, ty) -> (ident, (ty, ident))) ports
+updatePorts args ports = zipWith (\b (_, t) -> (Direct b, (t, (Direct b)))) args ports
 
 assignOutputs :: (a1  -> a2  -> Maybe CDecl  -> b2  -> ((CType, CExpression), a4, [CStatement])) -> (a1, [CStatement]) -> ((a2, b2), CDecl) -> (a4, [CStatement])
-assignOutputs fun (cntr, stmts) ((tout, expr), outport@(ty, ident)) = (cntr1, stmts1) where
+assignOutputs fun (cntr, stmts) ((tout, expr), outport@(ident, ty)) = (cntr1, stmts1) where
   (tyE1, cntr1, init1) = fun cntr tout (Just outport) expr
   assignTo = (derefTo CIR.TVoid ty $ CIR.EVar ident)
   assignFrom = (derefTo CIR.TVoid (fst tyE1) $ snd tyE1)
@@ -473,7 +473,7 @@ makeComb _ _ inports outports liports loports pt =
       argMap = fmap (fmap CIR.EVar) <$> newInPorts
       outArgs = makeMap [] outports
       tys' = map portToC liports
-      assign tys cntr tout a e = runRWS (exprToCExpr tys tout (map snd newInPorts) a e) argMap cntr
+      assign tys cntr tout a e = runRWS (exprToCExpr tys tout (map (fmap fst) newInPorts) a e) argMap cntr
    in case decomposeExpr expr of
         (Var v, touts, argExprs, [])
           | (isTupleConstructor . getResType . varType $ v) ->
@@ -516,7 +516,7 @@ bodyToStatement inports outports = \case
    func e =
     let (args, expr') = collectBinders e
         argMap = makeMap args inports
-        ((_, expr), _, stmts) = runRWS (exprToCExpr (map fst inports) (fst . head $ outports) inports Nothing expr') argMap 0
+        ((_, expr), _, stmts) = runRWS (exprToCExpr (map snd inports) (snd . head $ outports) inports Nothing expr') argMap 0
      in ( Return
         , argMap
         , []
@@ -559,21 +559,20 @@ instance Synthesizable CContext where
         case subsystem of
           -- We don't have a subsystem, need to actually traverse the body.
           Nothing ->
-            let inputs = zip (map portToC inports) inputIds
-                outputs = zip (map portToC outports) outputIds
+            let inputs = zip inputIds (map portToC inports)
+                outputs = zip outputIds (map portToC outports)
                 (retLoc, argMap, outArgs, stateArgs, body') = bodyToStatement inputs outputs procType
-                argToDef (k, (t, _)) = (t, k)
                 context =
                   CContext
                     { from = binder
                     , ret = case retLoc of
                         FunArg -> CIR.TVoid
                         Return -> case outputs of
-                          [output] -> fst output
+                          [output] -> snd output
                           _ -> CIR.TVoid
-                    , inputs = map argToDef argMap
+                    , inputs = map (fmap fst) argMap
                     , outputs = case retLoc of
-                        FunArg -> map argToDef outArgs
+                        FunArg -> map (fmap fst) outArgs
                         Return -> mempty
                     , delayStorage = S.fromList stateArgs
                     , delay = not . null $ stateArgs
@@ -589,8 +588,8 @@ instance Synthesizable CContext where
                 systemProcs = S.elems . mconcat . map (vertexProcs (S.fromList procs)) $ vertices
                 -- Synthesise all referenced processes.
                 (subsysNew, allC1) = foldr (synthesize procs') (newC, allC) systemProcs
-                inDefs = map (\(i, t) -> (portToC t, IEmpty <$ i)) inputs
-                outDefs = map (\(i, t) -> (portToC t, IEmpty <$ i)) outputs
+                inDefs = map (\(i, t) -> (IEmpty <$ i, portToC t)) inputs
+                outDefs = map (\(i, t) -> (IEmpty <$ i, portToC t)) outputs
                 updateId f (i, (t, e)) = (f i, (t, f <$> e))
                 -- Link all vertices to its invoked process' context.
                 vertexContext v@Vertex{process, id = ix} = case process of
@@ -618,7 +617,7 @@ instance Synthesizable CContext where
                             S.elems delayStorage
                       )
                     <$> delays
-                delayDef var (i, (t, e)) = ((IEmpty <$ fst var) <> i, (t, e))
+                delayDef var (i, te) = ((IEmpty <$ fst var) <> i, te)
                 -- Get all delays passed from subsystems.
                 subsysStorage =
                   mconcat
@@ -630,23 +629,23 @@ instance Synthesizable CContext where
                 findVert vid = find (\(Vertex{id = i}, _) -> i == vid) <$> vContext >>= id
                 -- Collect the vertices in scheduled order
                 schedVert = sequenceA <$> map findVert <$> schedule >>= id
-                delaySigs' = S.map (\(t, b, _) -> (t, (IEmpty <$ b) <> ExId IDelay)) delaySigs
-                pointers = delaySigs' <> (S.fromList . map (\(i, t) -> (portToC t, IEmpty <$ i)) $ (inputs <> outputs))
+                delaySigs' = S.map (\(t, b, _) -> (IEmpty <$ b <> ExId IDelay, t)) delaySigs
+                pointers = delaySigs' <> (S.fromList . map (\(i, t) -> (IEmpty <$ i, portToC t)) $ (inputs <> outputs))
                 -- Get the calls to the scheduled processes, passing which
                 -- Ids should be dereferenced or not.
-                schedStmts = map (CIR.SExpr . vertexToExpr (S.map snd pointers)) <$> schedVert
+                schedStmts = map (CIR.SExpr . vertexToExpr (S.map fst pointers)) <$> schedVert
                 locals =
                   S.difference
                     ( S.fromList $
                         mapMaybe
                           ( \(Edge ident port delay _ _) ->
-                              if delay then Nothing else Just (portToC port, IEmpty <$ ident)
+                              if delay then Nothing else Just (IEmpty <$ ident, portToC port)
                           )
                           edges
                     )
-                    (pointers)
+                    pointers
                 -- Get declarations of intermediare signals.
-                localDefs = S.map ((\(t, s) -> CIR.SVarDecl t s Nothing) . (\(t, n) -> (removePoint t, n))) locals
+                localDefs = S.map ((\(s, t) -> CIR.SVarDecl t s Nothing) . (\(n, t) -> (n, removePoint t))) locals
                 -- Get definitions of delays and initialise them to their
                 -- previous value.
                 delayTmps =
@@ -691,7 +690,7 @@ instance Synthesizable CContext where
         (CIR.SVarDef CIR.TSizeT countId Nothing (CIR.EInt 0))
         (CIR.EBinOp CIR.Less (CIR.EVar countId) maxExp)
         (CIR.SExpr $ CIR.EUnOp CIR.PostIncrement (CIR.EVar $ countId))
-    getInput failStmt ret (t, v) = case removePoint t of
+    getInput failStmt ret (v, t) = case removePoint t of
       CIR.TConstructor (CIR.TIdent (ExId IVector)) t' ->
         [ CIR.SExpr $
             CIR.ECall (ExId $ Name "skepu::external") $
@@ -700,10 +699,10 @@ instance Synthesizable CContext where
                     [ CIR.SVarDecl CIR.TSizeT (ExId Tmp <> Ix 0) Nothing
                     , CIR.SVarDecl t' (ExId Input) Nothing
                     ]
-                      <> getInput (CIR.SReturn Nothing) statusVar (CIR.TSizeT, ExId Tmp <> Ix 0)
+                      <> getInput (CIR.SReturn Nothing) statusVar (ExId Tmp <> Ix 0, CIR.TSizeT)
                       <> [ initV v [ExId Tmp <> Ix 0] ]
                       <> [ forShort (ExId Tmp <> Ix 1) (CIR.EVar $ ExId Tmp <> Ix 0) $ CIR.SScope $
-                             getInput (CIR.SReturn Nothing) statusVar (t', ExId Input)
+                             getInput (CIR.SReturn Nothing) statusVar (ExId Input, t')
                                <> [ CIR.SAssign
                                       (CIR.ECall v [CIR.EVar (ExId Tmp <> Ix 1)])
                                       (CIR.EVar $ ExId Input)
@@ -722,12 +721,12 @@ instance Synthesizable CContext where
                     , CIR.SVarDecl CIR.TSizeT (ExId Tmp <> Ix 1) Nothing
                     , CIR.SVarDecl t' (ExId Input) Nothing
                     ]
-                      <> getInput (CIR.SReturn Nothing) statusVar (CIR.TSizeT, ExId Tmp <> Ix 0)
-                      <> getInput (CIR.SReturn Nothing) statusVar (CIR.TSizeT, ExId Tmp <> Ix 1)
+                      <> getInput (CIR.SReturn Nothing) statusVar (ExId Tmp <> Ix 0, CIR.TSizeT)
+                      <> getInput (CIR.SReturn Nothing) statusVar (ExId Tmp <> Ix 1, CIR.TSizeT)
                       <> [ initV v $ (ExId Tmp <>) . Ix <$> [0, 1] ]
                       <> [ forShort (ExId Tmp <> Ix 2) (CIR.EVar $ ExId Tmp <> Ix 0) $ CIR.SScope
                              [ forShort (ExId Tmp <> Ix 3) (CIR.EVar $ ExId Tmp <> Ix 1) $ CIR.SScope
-                                 $ getInput (CIR.SReturn Nothing) statusVar (t', ExId Input)
+                                 $ getInput (CIR.SReturn Nothing) statusVar (ExId Input, t')
                                    <> [ CIR.SAssign
                                           (CIR.ECall v [CIR.EVar (ExId Tmp <> Ix 2), CIR.EVar (ExId Tmp <> Ix 3)])
                                           (CIR.EVar $ ExId Input)
@@ -744,7 +743,7 @@ instance Synthesizable CContext where
             (CIR.ECall (ExId $ Name "scanf") [CIR.EString $ typeToFormat t, CIR.EReference $ CIR.EVar v])
         , breakInput failStmt
         ]
-    putOutput (t, v) = case removePoint t of
+    putOutput (v, t) = case removePoint t of
       CIR.TConstructor _ _ ->
         [ CIR.SStream (ExId $ Name "skepu::io::cout") True $
             [ CIR.EVar v
@@ -767,7 +766,7 @@ instance Synthesizable CContext where
       CIR.TChar -> "%c"
       CIR.TSizeT -> "%zu"
       t -> error $ "unknown format string for " <> show t
-    getArg (_, v) = CIR.EReference $ CIR.EVar v
+    getArg (v, _) = CIR.EReference $ CIR.EVar v
     statusVar = ExId $ Name "status"
     breakInput stmt =
       CIR.SIf
@@ -779,29 +778,29 @@ instance Synthesizable CContext where
         Nothing
         CIR.TInt
         (ExId $ Name "main")
-        [(CIR.TInt, ExId $ Name "argc"), (CIR.TPointer . CIR.TPointer $ CIR.TChar, ExId $ Name "argv")]
+        [(ExId $ Name "argc", CIR.TInt), (ExId $ Name "argv", CIR.TPointer . CIR.TPointer $ CIR.TChar)]
         $ CIR.SScope
         $ map (\(v, (t, e)) -> CIR.SVarDef (removePoint t) v Nothing e) (S.elems delayStorage)
           <> [ CIR.SWhile (CIR.EInt 1) $
                  CIR.SScope $
-                   map (\(t, v) -> CIR.SVarDecl (removePoint t) v Nothing) (inputs <> outputs)
+                   map (\(v, t) -> CIR.SVarDecl (removePoint t) v Nothing) (inputs <> outputs)
                      <> [CIR.SVarDef CIR.TInt statusVar Nothing (CIR.EInt 1)]
                      <> (mconcat . map (getInput CIR.SBreak statusVar)) inputs
                      <> [ CIR.SExpr $
                             CIR.ECall (IEmpty <$ from) $
                               map getArg $
-                                inputs <> outputs <> (S.elems $ S.map (\(v, (t, _)) -> (t, v)) $ delayStorage)
+                                inputs <> outputs <> (S.elems $ S.map (fmap fst) $ delayStorage)
                         ]
                      <> (mconcat . map putOutput) outputs
              ]
           <> [CIR.SReturn $ Just $ CIR.EInt $ -1]
     contextToGlobal CContext{..} =
       ( CIR.GFuncDeclare (Just CIR.Static) ret (IEmpty <$ from) $
-          inputs <> outputs <> (S.elems . S.map (\(n, (t, _)) -> (t, n))) delayStorage
+          inputs <> outputs <> (S.elems . S.map (fmap fst)) delayStorage
       , CIR.GFuncDef
           (Just CIR.Static)
           ret
           (IEmpty <$ from)
-          (inputs <> outputs <> (S.elems . S.map (\(n, (t, _)) -> (t, n))) delayStorage)
+          (inputs <> outputs <> (S.elems . S.map (fmap fst)) delayStorage)
           body
       )
