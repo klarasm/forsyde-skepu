@@ -437,12 +437,15 @@ instance (Pretty a) => Pretty (Global a) where
         <> line
         <> pretty body
     GVarDeclare varType varId ->
-      pretty varType <+> pretty varId
+      pretty varType
+        <+> pretty varId
+        <> semi
     GVarDef varType varId expression ->
       pretty varType
         <+> pretty varId
         <+> pretty "="
         <+> pretty expression
+        <> semi
     GStruct structId fields ->
       pretty "struct"
         <+> pretty structId
